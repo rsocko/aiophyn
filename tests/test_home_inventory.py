@@ -38,11 +38,11 @@ class TestGetFixtureTypes:
         result = await home_inventory.get_fixture_types()
 
         assert isinstance(result, list)
-        assert len(result) == 9
+        assert len(result) == 16
 
     @pytest.mark.asyncio
     async def test_fixture_type_structure(self, home_inventory, mock_request):
-        """Verify each fixture type has required fields."""
+        """Verify each fixture type has required fields matching real API."""
         mock_request.return_value = SAMPLE_FIXTURE_TYPES
         result = await home_inventory.get_fixture_types()
 
@@ -50,8 +50,11 @@ class TestGetFixtureTypes:
             assert "home_inventory_type_id" in ft
             assert "name" in ft
             assert "home_inventory_type" in ft
+            assert "image" in ft
             assert isinstance(ft["home_inventory_type_id"], int)
             assert isinstance(ft["name"], str)
+            assert isinstance(ft["image"], str)
+            assert ft["image"].startswith("https://s3.amazonaws.com/com.phyn.icons/")
 
     @pytest.mark.asyncio
     async def test_known_fixture_types(self, home_inventory, mock_request):
@@ -69,13 +72,13 @@ class TestGetFixtureTypes:
 
     @pytest.mark.asyncio
     async def test_fixture_categories(self, home_inventory, mock_request):
-        """Verify fixture categories are valid."""
+        """Verify fixture categories use real API values."""
         mock_request.return_value = SAMPLE_FIXTURE_TYPES
         result = await home_inventory.get_fixture_types()
 
-        valid_categories = {"appliance", "fixture", "outdoor", "other"}
+        # Real API uses "F" for all fixture types (not descriptive categories)
         for ft in result:
-            assert ft["home_inventory_type"] in valid_categories
+            assert ft["home_inventory_type"] == "F"
 
     @pytest.mark.asyncio
     async def test_empty_response(self, home_inventory, mock_request):
@@ -114,12 +117,18 @@ class TestGetDeviceInventory:
         result = await home_inventory.get_device_inventory("DEVICE123")
 
         configured = [f for f in result["list"] if f.get("count", 0) > 0]
-        assert len(configured) == 5
+        assert len(configured) == 9
 
         names = {f["name"] for f in configured}
         assert "Toilet" in names
         assert "Shower Only" in names
         assert "Sink" in names
+        assert "Dishwasher" in names
+        assert "Washing Machine" in names
+        assert "Shower Tub Combo" in names
+        assert "Tub" in names
+        assert "Hot Water Heater" in names
+        assert "Refrigerator" in names
 
     @pytest.mark.asyncio
     async def test_unconfigured_fixtures(self, home_inventory, mock_request):
@@ -128,11 +137,11 @@ class TestGetDeviceInventory:
         result = await home_inventory.get_device_inventory("DEVICE123")
 
         unconfigured = [f for f in result["list"] if f.get("count", 0) == 0]
-        assert len(unconfigured) == 2
+        assert len(unconfigured) == 3
 
     @pytest.mark.asyncio
     async def test_fixture_entry_structure(self, home_inventory, mock_request):
-        """Verify each inventory entry has required fields."""
+        """Verify each inventory entry has required fields from real API."""
         mock_request.return_value = SAMPLE_DEVICE_INVENTORY
         result = await home_inventory.get_device_inventory("DEVICE123")
 
@@ -140,7 +149,33 @@ class TestGetDeviceInventory:
             assert "home_inventory_type_id" in f
             assert "name" in f
             assert "count" in f
+            assert "image" in f
+            assert "home_inventory_type" in f
             assert isinstance(f["count"], int)
+            assert f["home_inventory_type"] == "F"
+            assert f["image"].startswith("https://")
+
+    @pytest.mark.asyncio
+    async def test_sub_fixtures(self, home_inventory, mock_request):
+        """Verify sub_fixtures field is present on some entries (real API feature)."""
+        mock_request.return_value = SAMPLE_DEVICE_INVENTORY
+        result = await home_inventory.get_device_inventory("DEVICE123")
+
+        # Find Shower Only entry which has sub_fixtures in real data
+        shower = next(
+            (f for f in result["list"] if f["name"] == "Shower Only"), None
+        )
+        assert shower is not None
+        assert "sub_fixtures" in shower
+        assert isinstance(shower["sub_fixtures"], list)
+        assert len(shower["sub_fixtures"]) >= 1
+
+        sub = shower["sub_fixtures"][0]
+        assert "name" in sub
+        assert "active" in sub
+        assert "id" in sub
+        assert sub["name"] == "Master Bathroom"
+        assert sub["active"] is True
 
     @pytest.mark.asyncio
     async def test_different_device_ids(self, home_inventory, mock_request):

@@ -17,6 +17,7 @@ Derived from: ideation/experiments/home-automation/phyn-api-exploration/scripts/
 Usage:
     1. Copy .env.example to .env and fill in your credentials
     2. Run: python test_comprehensive.py
+    3. Output is saved to output/test_comprehensive_<timestamp>.json
 """
 import asyncio
 import json
@@ -44,6 +45,18 @@ USERNAME = os.getenv("PHYN_USERNAME")
 PASSWORD = os.getenv("PHYN_PASSWORD")
 BRAND = os.getenv("PHYN_BRAND", "phyn")
 DEVICE_ID = os.getenv("PHYN_DEVICE_ID")
+
+OUTPUT_DIR = Path(__file__).parent / "output"
+
+
+def _save_output(data: dict) -> Path:
+    """Save captured API responses to a timestamped JSON file."""
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = OUTPUT_DIR / f"test_comprehensive_{ts}.json"
+    path.write_text(json.dumps(data, indent=2, default=str))
+    print(f"\n  Output saved to {path}")
+    return path
 
 
 def print_section(title: str) -> None:
@@ -76,6 +89,7 @@ async def main() -> None:
     print("=" * 70)
 
     results = {"passed": 0, "failed": 0, "tests": []}
+    captured: dict = {"timestamp": datetime.now().isoformat(), "responses": {}}
 
     async with ClientSession() as session:
         try:
@@ -95,6 +109,7 @@ async def main() -> None:
             )
 
             if homes:
+                captured["responses"]["get_homes"] = homes
                 results["passed"] += 1
                 results["tests"].append({"name": "get_homes", "status": "PASS"})
                 print(f"    Found {len(homes)} home(s)")
@@ -134,6 +149,7 @@ async def main() -> None:
                 "get_state", api.device.get_state(device_id)
             )
             if state:
+                captured["responses"]["get_state"] = state
                 results["passed"] += 1
                 results["tests"].append({"name": "get_state", "status": "PASS"})
                 temp = state.get("temperature", {}).get("mean", "N/A")
@@ -156,6 +172,7 @@ async def main() -> None:
                 ),
             )
             if consumption:
+                captured["responses"]["get_consumption"] = consumption
                 results["passed"] += 1
                 results["tests"].append({"name": "get_consumption", "status": "PASS"})
                 gallons = consumption.get("water_consumption", 0)
@@ -176,6 +193,7 @@ async def main() -> None:
                 ),
             )
             if events_data is not None:
+                captured["responses"]["get_water_usage_events"] = events_data
                 results["passed"] += 1
                 results["tests"].append(
                     {"name": "get_water_usage_events", "status": "PASS"}
@@ -202,6 +220,7 @@ async def main() -> None:
                 "get_fixture_types", api.home_inventory.get_fixture_types()
             )
             if fixture_types:
+                captured["responses"]["get_fixture_types"] = fixture_types
                 results["passed"] += 1
                 results["tests"].append(
                     {"name": "get_fixture_types", "status": "PASS"}
@@ -227,6 +246,7 @@ async def main() -> None:
                 api.home_inventory.get_device_inventory(device_id),
             )
             if inventory:
+                captured["responses"]["get_device_inventory"] = inventory
                 results["passed"] += 1
                 results["tests"].append(
                     {"name": "get_device_inventory", "status": "PASS"}
@@ -250,6 +270,7 @@ async def main() -> None:
                 api.device.get_device_preferences(device_id),
             )
             if prefs:
+                captured["responses"]["get_device_preferences"] = prefs
                 results["passed"] += 1
                 results["tests"].append(
                     {"name": "get_device_preferences", "status": "PASS"}
@@ -273,6 +294,7 @@ async def main() -> None:
                 api.device.get_latest_firmware_info(device_id),
             )
             if fw:
+                captured["responses"]["get_latest_firmware_info"] = fw
                 results["passed"] += 1
                 results["tests"].append(
                     {"name": "get_latest_firmware_info", "status": "PASS"}
@@ -299,6 +321,7 @@ async def main() -> None:
                 "get_away_mode", api.device.get_away_mode(device_id)
             )
             if away is not None:
+                captured["responses"]["get_away_mode"] = away
                 results["passed"] += 1
                 results["tests"].append({"name": "get_away_mode", "status": "PASS"})
                 print(f"    Away mode data: {json.dumps(away)[:200]}")
@@ -319,6 +342,10 @@ async def main() -> None:
 
         except PhynError as err:
             _LOGGER.error("There was an error: %s", err)
+            captured["error"] = str(err)
+
+    captured["results"] = results
+    _save_output(captured)
 
 
 asyncio.run(main())

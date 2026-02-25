@@ -5,3 +5,4 @@ examples/config.py
 .env
 *.env
 !.env.example
+examples/output/

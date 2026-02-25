@@ -36,15 +36,34 @@ class TestGetHomes:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_home_contains_devices(self, home, mock_request):
-        """Verify home entries contain device information."""
+    async def test_home_contains_multiple_devices(self, home, mock_request):
+        """Verify home entries contain multiple devices (real scenario)."""
         mock_request.return_value = SAMPLE_HOMES
         result = await home.get_homes("user@example.com")
 
         home_info = result[0]
         assert "devices" in home_info
-        assert len(home_info["devices"]) == 1
-        assert home_info["devices"][0]["device_id"] == "28F53741CBBA"
+        assert len(home_info["devices"]) == 2
+        assert home_info["devices"][0]["device_id"] == "AABBCCDDEEFF"
+        assert home_info["devices"][1]["device_id"] == "112233445566"
+
+        # Both devices should have product_code
+        for device in home_info["devices"]:
+            assert "product_code" in device
+            assert device["product_code"] == "PP2"
+
+    @pytest.mark.asyncio
+    async def test_home_contains_device_ids_list(self, home, mock_request):
+        """Verify home has device_ids shortcut array."""
+        mock_request.return_value = SAMPLE_HOMES
+        result = await home.get_homes("user@example.com")
+
+        home_info = result[0]
+        assert "device_ids" in home_info
+        assert isinstance(home_info["device_ids"], list)
+        assert len(home_info["device_ids"]) == 2
+        assert "AABBCCDDEEFF" in home_info["device_ids"]
+        assert "112233445566" in home_info["device_ids"]
 
     @pytest.mark.asyncio
     async def test_home_contains_address(self, home, mock_request):
@@ -55,3 +74,10 @@ class TestGetHomes:
         home_info = result[0]
         assert "address" in home_info
         assert home_info["address"]["address1"] == "123 Main St"
+
+    @pytest.mark.asyncio
+    async def test_empty_homes(self, home, mock_request):
+        """Verify empty response is handled."""
+        mock_request.return_value = []
+        result = await home.get_homes("nodevices@example.com")
+        assert result == []

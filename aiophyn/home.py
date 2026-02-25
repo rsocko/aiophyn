@@ -14,11 +14,14 @@ class Home:
     async def get_homes(
         self,
         user_id: str,
-    ) -> dict:
+    ) -> list:
         """Return info for all homes.
 
         :param user_id: Phyn username (email)
         :type user_id: ``str``
+        :return: List of home dicts. Each contains id (str),
+            address (dict with address1), device_ids (list[str]),
+            and devices (list[dict] with device_id, product_code, name).
         :rtype: ``list``
         """
         params = {"user_id": user_id}

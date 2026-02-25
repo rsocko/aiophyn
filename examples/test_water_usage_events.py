@@ -12,6 +12,7 @@ Usage:
     1. Copy .env.example to .env and fill in your credentials
     2. Run: python test_water_usage_events.py
        Optional: python test_water_usage_events.py --days 1,7,30 --low-confidence-threshold 0.7
+    3. Output is saved to output/test_water_usage_events_<timestamp>.json
 """
 import argparse
 import asyncio
@@ -41,6 +42,8 @@ USERNAME = os.getenv("PHYN_USERNAME")
 PASSWORD = os.getenv("PHYN_PASSWORD")
 BRAND = os.getenv("PHYN_BRAND", "phyn")
 DEVICE_ID = os.getenv("PHYN_DEVICE_ID")
+
+OUTPUT_DIR = Path(__file__).parent / "output"
 
 DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.70
 DEFAULT_AMBIGUITY_GAP_THRESHOLD = 0.15
@@ -179,6 +182,8 @@ async def main(args: argparse.Namespace) -> None:
     print("WATER USAGE EVENTS - FIXTURE PREDICTIONS TEST")
     print("=" * 70)
 
+    captured: dict = {"timestamp": datetime.now().isoformat(), "responses": {}}
+
     async with ClientSession() as session:
         try:
             # Authenticate
@@ -224,6 +229,13 @@ async def main(args: argparse.Namespace) -> None:
                     events = await api.device.get_water_usage_events(
                         device_id, from_dt, to_dt
                     )
+                    captured["responses"].setdefault(device_id, {})
+                    captured["responses"][device_id][range_name] = {
+                        "from": from_dt.isoformat(),
+                        "to": to_dt.isoformat(),
+                        "event_count": len(events),
+                        "events": events,
+                    }
 
                     print(f"  Events found: {len(events)}")
 
@@ -352,6 +364,17 @@ async def main(args: argparse.Namespace) -> None:
 
         except PhynError as err:
             _LOGGER.error("There was an error: %s", err)
+            captured["error"] = str(err)
+
+    def _save_output(data: dict) -> Path:
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = OUTPUT_DIR / f"test_water_usage_events_{ts}.json"
+        path.write_text(json.dumps(data, indent=2, default=str))
+        print(f"\nOutput saved to {path}")
+        return path
+
+    _save_output(captured)
 
 
 asyncio.run(main(parse_args()))
