@@ -16,6 +16,7 @@ from .mqtt import MQTTClient
 from .device import Device
 from .errors import AuthenticationError, RequestError
 from .home import Home
+from .home_inventory import HomeInventory
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class API:
         self.alert: Alert = Alert(self._request)
         self.home: Home = Home(self._request)
         self.device: Device = Device(self._request)
+        self.home_inventory: HomeInventory = HomeInventory(self._request)
         self.mqtt = MQTTClient(self, client_id=client_id, verify_ssl=verify_ssl, proxy=proxy, proxy_port=proxy_port)
 
     @property

@@ -2,3 +2,6 @@
 __pycache__/
 .DS_Store
 examples/config.py
+.env
+*.env
+!.env.example

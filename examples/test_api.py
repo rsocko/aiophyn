@@ -1,4 +1,9 @@
-"""Run an example script to quickly test."""
+"""Run an example script to quickly test.
+
+Usage:
+    1. Copy .env.example to .env and fill in your credentials
+    2. Run: python test_api.py
+"""
 import asyncio
 import logging
 from datetime import date

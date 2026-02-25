@@ -1,4 +1,5 @@
 """Define /devices endpoints."""
+from datetime import datetime
 from typing import Awaitable, Any, Callable, Optional
 
 from .const import API_BASE
@@ -254,4 +255,44 @@ class Device:
         """
         return await self._request(
             "post", f"{API_BASE}/preferences/device/{device_id}", json=data
+        )
+
+    async def get_water_usage_events(
+        self,
+        device_id: str,
+        from_datetime: datetime,
+        to_datetime: datetime,
+    ) -> list[dict]:
+        """Get water usage events with fixture predictions.
+
+        Fetches individual water usage events for the specified time range,
+        including ML-based fixture predictions and confidence scores.
+
+        :param device_id: Unique identifier for the device
+        :type device_id: str
+        :param from_datetime: Start of time range
+        :type from_datetime: datetime
+        :param to_datetime: End of time range
+        :type to_datetime: datetime
+        :return: List of water usage events with fixture predictions.
+            Each event contains event_id, total_flow, flow_rate,
+            open_edge_timestamp, close_edge_timestamp, and
+            latest_suggested_fixtures_result with suggested_fixtures list.
+        :rtype: list[dict]
+
+        .. note::
+            The Phyn API requires timestamps in MILLISECONDS (13 digits).
+            This method handles the conversion internally from datetime objects.
+        """
+        from_ts = int(from_datetime.timestamp() * 1000)
+        to_ts = int(to_datetime.timestamp() * 1000)
+
+        params = {
+            "device_id": device_id,
+            "from_ts": str(from_ts),
+            "to_ts": str(to_ts),
+        }
+
+        return await self._request(
+            "get", f"{API_BASE}/water-usage-events", params=params
         )
