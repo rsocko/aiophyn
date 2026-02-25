@@ -247,7 +247,7 @@ SAMPLE_WATER_USAGE_EVENTS = [
                     "fixture_id": 8,
                     "fixture_name": "Toilet",
                     "confidence_score": 0.85,
-                    "prediction_algorithm": "heuristics",
+                    "prediction_algorithm": "clustering",
                 },
                 {
                     "fixture_id": 7,
@@ -275,7 +275,7 @@ SAMPLE_WATER_USAGE_EVENTS = [
                     "fixture_id": 5,
                     "fixture_name": "Shower Only",
                     "confidence_score": 0.92,
-                    "prediction_algorithm": "heuristics",
+                    "prediction_algorithm": "clustering",
                 },
             ],
             "created_timestamp": 1771949460000,

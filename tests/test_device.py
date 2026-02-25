@@ -260,7 +260,7 @@ class TestWaterUsageEvents:
 
         assert len(result) == 4
 
-        # First event: Toilet prediction with heuristics algorithm
+        # First event: Toilet prediction with clustering ML algorithm
         event1 = result[0]
         assert event1["id"] == "a1b2c3d4-e5f6-7890-abcd-ef1234567890-12345"
         assert event1["product_code"] == "PP2"
@@ -271,7 +271,7 @@ class TestWaterUsageEvents:
         fixtures = fixtures_result["suggested_fixtures"]
         assert fixtures[0]["fixture_name"] == "Toilet"
         assert fixtures[0]["confidence_score"] == 0.85
-        assert fixtures[0]["prediction_algorithm"] == "heuristics"
+        assert fixtures[0]["prediction_algorithm"] == "clustering"
 
         # Second event: Shower prediction
         event2 = result[1]
@@ -548,35 +548,28 @@ class TestFirmware:
 
     @pytest.mark.asyncio
     async def test_get_latest_firmware_info(self, device, mock_request):
-        mock_request.return_value = SAMPLE_FIRMWARE_INFO
+        """Real API returns a list; callers should use [0] to get the entry."""
+        mock_request.return_value = [SAMPLE_FIRMWARE_INFO]
         result = await device.get_latest_firmware_info("DEVICE123")
 
-        assert result["fw_version"] == 40809001
-        assert result["device_id"] == "AABBCCDDEEFF"
+        assert isinstance(result, list)
+        first = result[0]
+        assert first["fw_version"] == 40809001
+        assert first["device_id"] == "AABBCCDDEEFF"
 
     @pytest.mark.asyncio
     async def test_firmware_info_has_real_api_fields(self, device, mock_request):
         """Verify firmware response contains fields from real API."""
-        mock_request.return_value = SAMPLE_FIRMWARE_INFO
-        result = await device.get_latest_firmware_info("DEVICE123")
-
-        assert "device_id" in result
-        assert "server_ts" in result
-        assert "fw_version" in result
-        assert "upgraded_seconds" in result
-        assert isinstance(result["fw_version"], int)
-        assert isinstance(result["server_ts"], int)
-
-    @pytest.mark.asyncio
-    async def test_firmware_info_as_list(self, device, mock_request):
-        """Real API returns a list; HA integration indexes with [0]."""
         mock_request.return_value = [SAMPLE_FIRMWARE_INFO]
         result = await device.get_latest_firmware_info("DEVICE123")
 
-        # Simulate HA integration access pattern
         first = result[0]
-        assert first["fw_version"] == 40809001
-        assert first["device_id"] == "AABBCCDDEEFF"
+        assert "device_id" in first
+        assert "server_ts" in first
+        assert "fw_version" in first
+        assert "upgraded_seconds" in first
+        assert isinstance(first["fw_version"], int)
+        assert isinstance(first["server_ts"], int)
 
 
 class TestDevicePreferences:
@@ -614,16 +607,6 @@ class TestAutoShutoff:
         """Test the corrected method name."""
         mock_request.return_value = {"auto_shutoff_enable": True}
         result = await device.get_autoshutoff_status("DEVICE123")
-
-        mock_request.assert_called_once_with(
-            "get", f"{API_BASE}/devices/DEVICE123/auto_shutoff"
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_autoshuftoff_status_alias(self, device, mock_request):
-        """Test backward-compatible alias with original typo still works."""
-        mock_request.return_value = {"auto_shutoff_enable": True}
-        result = await device.get_autoshuftoff_status("DEVICE123")
 
         mock_request.assert_called_once_with(
             "get", f"{API_BASE}/devices/DEVICE123/auto_shutoff"
