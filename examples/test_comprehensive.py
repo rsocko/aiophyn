@@ -22,10 +22,16 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from aiohttp import ClientSession
 from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from aiophyn import async_get_api
 from aiophyn.errors import PhynError
@@ -179,10 +185,10 @@ async def main() -> None:
                     # Check for fixture data presence
                     sample = events_data[0]
                     has_fixtures = "latest_suggested_fixtures_result" in sample
-                    has_event_id = "event_id" in sample
+                    has_event_id = "id" in sample or "event_id" in sample
                     has_flow = "total_flow" in sample
                     print(f"    Has fixture predictions: {has_fixtures}")
-                    print(f"    Has event_id: {has_event_id}")
+                    print(f"    Has event identifier: {has_event_id}")
                     print(f"    Has total_flow: {has_flow}")
             else:
                 results["failed"] += 1
@@ -271,8 +277,16 @@ async def main() -> None:
                 results["tests"].append(
                     {"name": "get_latest_firmware_info", "status": "PASS"}
                 )
-                print(f"    Firmware version: {fw.get('fw_version', 'N/A')}")
-                print(f"    Product code: {fw.get('product_code', 'N/A')}")
+                firmware_info = fw[0] if isinstance(fw, list) and fw else fw
+                if isinstance(firmware_info, dict):
+                    print(
+                        f"    Firmware version: {firmware_info.get('fw_version', 'N/A')}"
+                    )
+                    print(
+                        f"    Product code: {firmware_info.get('product_code', 'N/A')}"
+                    )
+                else:
+                    print(f"    Firmware payload type: {type(fw).__name__}")
             else:
                 results["failed"] += 1
                 results["tests"].append(

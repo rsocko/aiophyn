@@ -16,9 +16,15 @@ import asyncio
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 
 from aiohttp import ClientSession
 from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from aiophyn import async_get_api
 from aiophyn.errors import PhynError
@@ -85,10 +91,13 @@ async def main() -> None:
             if DEVICE_ID:
                 devices = [DEVICE_ID]
 
+            device_inventories = {}
+
             for device_id in devices:
                 print(f"\nDevice: {device_id}")
 
                 inventory = await api.home_inventory.get_device_inventory(device_id)
+                device_inventories[device_id] = inventory
                 fixture_list = inventory.get("list", [])
 
                 configured = [f for f in fixture_list if f.get("count", 0) > 0]
@@ -119,31 +128,31 @@ async def main() -> None:
             print(f"{'=' * 70}")
 
             if devices and fixture_types:
-                device_id = devices[0]
-                inventory = await api.home_inventory.get_device_inventory(device_id)
-                fixture_list = inventory.get("list", [])
+                for device_id in devices:
+                    inventory = device_inventories.get(device_id, {})
+                    fixture_list = inventory.get("list", [])
 
-                # Build lookup
-                inventory_by_id = {
-                    f["home_inventory_type_id"]: f for f in fixture_list
-                }
+                    # Build lookup
+                    inventory_by_id = {
+                        f["home_inventory_type_id"]: f for f in fixture_list
+                    }
 
-                print(f"\nDevice: {device_id}")
-                print(
-                    f"  {'Type ID':>7} {'Name':<25} {'Category':<15} {'Count':>6}"
-                )
-                print(f"  {'-' * 7} {'-' * 25} {'-' * 15} {'-' * 6}")
-
-                for ft in fixture_types:
-                    type_id = ft.get("home_inventory_type_id")
-                    name = ft.get("name", "Unknown")
-                    category = ft.get("home_inventory_type", "N/A")
-                    inv = inventory_by_id.get(type_id)
-                    count = inv.get("count", 0) if inv else "-"
-                    marker = " *" if inv and inv.get("count", 0) > 0 else ""
+                    print(f"\nDevice: {device_id}")
                     print(
-                        f"  {type_id:>7} {name:<25} {category:<15} {str(count):>6}{marker}"
+                        f"  {'Type ID':>7} {'Name':<25} {'Category':<15} {'Count':>6}"
                     )
+                    print(f"  {'-' * 7} {'-' * 25} {'-' * 15} {'-' * 6}")
+
+                    for ft in fixture_types:
+                        type_id = ft.get("home_inventory_type_id")
+                        name = ft.get("name", "Unknown")
+                        category = ft.get("home_inventory_type", "N/A")
+                        inv = inventory_by_id.get(type_id)
+                        count = inv.get("count", 0) if inv else "-"
+                        marker = " *" if inv and inv.get("count", 0) > 0 else ""
+                        print(
+                            f"  {type_id:>7} {name:<25} {category:<15} {str(count):>6}{marker}"
+                        )
 
             print("\nTest complete.")
 

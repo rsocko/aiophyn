@@ -11,7 +11,10 @@ from unittest.mock import AsyncMock
 from aiophyn.home_inventory import HomeInventory
 from aiophyn.const import API_BASE
 
-from conftest import SAMPLE_FIXTURE_TYPES, SAMPLE_DEVICE_INVENTORY
+try:
+    from tests.conftest import SAMPLE_FIXTURE_TYPES, SAMPLE_DEVICE_INVENTORY
+except ModuleNotFoundError:
+    from conftest import SAMPLE_FIXTURE_TYPES, SAMPLE_DEVICE_INVENTORY
 
 
 class TestGetFixtureTypes:

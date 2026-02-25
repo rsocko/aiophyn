@@ -26,9 +26,9 @@ class Device:
         device_id: str,
         duration: str,
         precision: int = 6,
-        details: Optional[str] = False,
-        event_count: Optional[str] = False,
-        comparison: Optional[str] = False,
+        details: bool = False,
+        event_count: bool = False,
+        comparison: bool = False,
     ) -> dict:
         """Return water consumption of a device.
 
@@ -275,7 +275,7 @@ class Device:
         :param to_datetime: End of time range
         :type to_datetime: datetime
         :return: List of water usage events with fixture predictions.
-            Each event contains event_id, total_flow, flow_rate,
+            Each event contains id (event identifier), total_flow, flow_rate,
             open_edge_timestamp, close_edge_timestamp, and
             latest_suggested_fixtures_result with suggested_fixtures list.
         :rtype: list[dict]
@@ -295,4 +295,36 @@ class Device:
 
         return await self._request(
             "get", f"{API_BASE}/water-usage-events", params=params
+        )
+
+    async def submit_water_usage_event_feedback(
+        self,
+        event_id: str,
+        fixture_id: int,
+        sub_fixture_id: Optional[int] = None,
+        tell_us: Optional[str] = None,
+    ) -> dict:
+        """Submit fixture correction feedback for a water usage event.
+
+        :param event_id: Water usage event identifier
+        :type event_id: str
+        :param fixture_id: Correct fixture type ID (home_inventory_type_id)
+        :type fixture_id: int
+        :param sub_fixture_id: Optional sub-fixture identifier
+        :type sub_fixture_id: Optional[int]
+        :param tell_us: Optional custom fixture text
+        :type tell_us: Optional[str]
+        :return: API response
+        :rtype: dict
+        """
+        data = {
+            "fixture_id": fixture_id,
+            "sub_fixture_id": sub_fixture_id,
+            "tell_us": tell_us,
+        }
+        return await self._request(
+            "post",
+            f"{API_BASE}/water-usage-events/{event_id}/feedback/",
+            token_type="id",
+            json=data,
         )

@@ -59,7 +59,7 @@ SAMPLE_DEVICE_INVENTORY = {
 
 SAMPLE_WATER_USAGE_EVENTS = [
     {
-        "event_id": "evt_001",
+        "id": "evt_001",
         "device_id": "28F53741CBBA",
         "open_edge_timestamp": 1771945200000,
         "close_edge_timestamp": 1771945260000,
@@ -83,7 +83,7 @@ SAMPLE_WATER_USAGE_EVENTS = [
         },
     },
     {
-        "event_id": "evt_002",
+        "id": "evt_002",
         "device_id": "28F53741CBBA",
         "open_edge_timestamp": 1771948800000,
         "close_edge_timestamp": 1771949400000,
@@ -101,7 +101,7 @@ SAMPLE_WATER_USAGE_EVENTS = [
         },
     },
     {
-        "event_id": "evt_003",
+        "id": "evt_003",
         "device_id": "28F53741CBBA",
         "open_edge_timestamp": 1771952400000,
         "close_edge_timestamp": 1771952460000,
@@ -117,8 +117,11 @@ SAMPLE_WATER_USAGE_EVENTS = [
                 },
             ]
         },
-        "user_fixture_label": "Kitchen Sink",
-        "user_fixture_id": 7,
+        "latest_user_feedback": {
+            "fixture_id": 7,
+            "sub_fixture_id": 0,
+            "tell_us": "Kitchen Sink",
+        },
     },
 ]
 

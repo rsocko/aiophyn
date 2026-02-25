@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 from aiophyn.home import Home
 from aiophyn.const import API_BASE
 
-from conftest import SAMPLE_HOMES
+try:
+    from tests.conftest import SAMPLE_HOMES
+except ModuleNotFoundError:
+    from conftest import SAMPLE_HOMES
 
 
 class TestGetHomes:

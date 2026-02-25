@@ -14,12 +14,20 @@ from unittest.mock import AsyncMock, call
 from aiophyn.device import Device
 from aiophyn.const import API_BASE
 
-from conftest import (
-    SAMPLE_DEVICE_STATE,
-    SAMPLE_CONSUMPTION,
-    SAMPLE_WATER_USAGE_EVENTS,
-    SAMPLE_FIRMWARE_INFO,
-)
+try:
+    from tests.conftest import (
+        SAMPLE_DEVICE_STATE,
+        SAMPLE_CONSUMPTION,
+        SAMPLE_WATER_USAGE_EVENTS,
+        SAMPLE_FIRMWARE_INFO,
+    )
+except ModuleNotFoundError:
+    from conftest import (
+        SAMPLE_DEVICE_STATE,
+        SAMPLE_CONSUMPTION,
+        SAMPLE_WATER_USAGE_EVENTS,
+        SAMPLE_FIRMWARE_INFO,
+    )
 
 
 class TestDeviceState:
@@ -146,7 +154,7 @@ class TestWaterUsageEvents:
 
         # First event: Toilet prediction
         event1 = result[0]
-        assert event1["event_id"] == "evt_001"
+        assert event1["id"] == "evt_001"
         assert event1["total_flow"] == 1.53
         fixtures = event1["latest_suggested_fixtures_result"]["suggested_fixtures"]
         assert fixtures[0]["fixture_name"] == "Toilet"
@@ -170,9 +178,10 @@ class TestWaterUsageEvents:
 
         # Third event has user correction
         event3 = result[2]
-        assert event3["event_id"] == "evt_003"
-        assert event3.get("user_fixture_label") == "Kitchen Sink"
-        assert event3.get("user_fixture_id") == 7
+        assert event3["id"] == "evt_003"
+        feedback = event3.get("latest_user_feedback", {})
+        assert feedback.get("tell_us") == "Kitchen Sink"
+        assert feedback.get("fixture_id") == 7
 
     @pytest.mark.asyncio
     async def test_empty_response(self, device, mock_request):
@@ -218,6 +227,46 @@ class TestWaterStatistics:
             params={"from_ts": 1771945200000, "to_ts": 1771948800000},
         )
         assert len(result) == 1
+
+
+class TestWaterUsageEventFeedback:
+    """Tests for submit_water_usage_event_feedback."""
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_basic(self, device, mock_request):
+        mock_request.return_value = {"ok": True}
+
+        await device.submit_water_usage_event_feedback("evt_001", 8)
+
+        mock_request.assert_called_once_with(
+            "post",
+            f"{API_BASE}/water-usage-events/evt_001/feedback/",
+            token_type="id",
+            json={
+                "fixture_id": 8,
+                "sub_fixture_id": None,
+                "tell_us": None,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_with_optional_fields(self, device, mock_request):
+        mock_request.return_value = {"ok": True}
+
+        await device.submit_water_usage_event_feedback(
+            "evt_002", 7, sub_fixture_id=12, tell_us="Kitchen Sink"
+        )
+
+        mock_request.assert_called_once_with(
+            "post",
+            f"{API_BASE}/water-usage-events/evt_002/feedback/",
+            token_type="id",
+            json={
+                "fixture_id": 7,
+                "sub_fixture_id": 12,
+                "tell_us": "Kitchen Sink",
+            },
+        )
 
 
 class TestValveControl:

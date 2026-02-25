@@ -12,6 +12,13 @@ from aiophyn.errors import BrandError, RequestError, PhynError
 class TestAPIInit:
     """Tests for API class initialization."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_mqtt_client(self):
+        """Mock MQTTClient so API init tests don't require a running event loop."""
+        with patch("aiophyn.api.MQTTClient") as mqtt_cls:
+            mqtt_cls.return_value = MagicMock()
+            yield mqtt_cls
+
     def test_phyn_brand(self):
         """Verify phyn brand initializes correctly."""
         api = API("user@example.com", "password", phyn_brand="phyn")
