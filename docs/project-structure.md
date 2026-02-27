@@ -90,7 +90,7 @@ You are reading it. This directory contains developer-facing documentation for u
 Project metadata and build configuration using Poetry:
 
 - **Name:** `aiophyn`
-- **Version:** `2026.2.0`
+- **Version:** `2026.2.1`
 - **License:** MIT
 - **Python:** `^3.9`
 - **Key dependencies:** `pycognito`, `aiohttp`, `boto3`, `paho-mqtt`, `pysocks`, `pycryptodome`

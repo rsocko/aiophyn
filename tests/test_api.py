@@ -20,20 +20,19 @@ class TestAPIInit:
             yield mqtt_cls
 
     def test_phyn_brand(self):
-        """Verify phyn brand initializes correctly."""
+        """Verify phyn brand initializes correctly (brand param accepted for compat)."""
         api = API("user@example.com", "password", phyn_brand="phyn")
-        assert api._brand == 0
         assert api._username == "user@example.com"
 
     def test_kohler_brand(self):
-        """Verify kohler brand initializes correctly."""
+        """Verify kohler brand initializes correctly (brand param accepted for compat)."""
         api = API("user@example.com", "password", phyn_brand="kohler")
-        assert api._brand == 1
+        assert api._username == "user@example.com"
 
-    def test_invalid_brand_raises(self):
-        """Verify invalid brand raises BrandError."""
-        with pytest.raises(BrandError):
-            API("user@example.com", "password", phyn_brand="invalid")
+    def test_invalid_brand_accepted(self):
+        """Verify unknown brand is accepted (brand param deprecated, ignored)."""
+        api = API("user@example.com", "password", phyn_brand="invalid")
+        assert api._username == "user@example.com"
 
     def test_has_device_attribute(self):
         """Verify API has device handler."""

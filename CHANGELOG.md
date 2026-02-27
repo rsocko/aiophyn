@@ -2,6 +2,27 @@
 
 All notable changes to the `aiophyn` library will be documented in this file.
 
+## [2026.2.1] — 2026-02-27
+
+### New Features
+
+- **`HomeInventory` module** — New `HomeInventory` class with methods to fetch the
+  master fixture type catalog (`get_fixture_types`), query per-device fixture
+  inventory (`get_device_inventory`), and update fixture counts
+  (`update_device_inventory`).
+
+- **`submit_water_usage_event_feedback`** — New `Device` method to submit user
+  fixture correction feedback for a water usage event (uses `token_type="id"`).
+
+- **`HomeInventory` exported from top-level package** — `from aiophyn import HomeInventory`
+  now works.
+
+### Non-Breaking Changes
+
+- **`get_homes` return type corrected** — `dict` → `list` to match actual API response.
+- **`run_leak_test` `extended_test` parameter** — Now accepts `Union[bool, str]`
+  for service call compatibility.
+
 ## [2026.2.0] — 2026-02-25
 
 ### Breaking Changes
