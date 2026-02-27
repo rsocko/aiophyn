@@ -119,21 +119,16 @@ Both REST API calls and MQTT WebSocket connections respect the proxy settings.
 
 ## Dependencies
 
-### Core Dependencies (from `pyproject.toml`)
+### Runtime Dependencies (from `pyproject.toml`)
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `aiohttp` | `^3.8.1` | Async HTTP client for REST API calls |
 | `boto3` | `^1.20.24` | AWS SDK for Cognito authentication |
 | `pycognito` | `^2022.8.0` | AWS Cognito SRP authentication helper |
-
-### Runtime Dependencies (not declared in pyproject.toml)
-
-| Package | Purpose |
-|---------|---------|
-| `paho-mqtt` | MQTT client for real-time streaming |
-| `pysocks` | SOCKS proxy support for MQTT connections |
-| `pycryptodome` | AES decryption for Kohler password tokens |
+| `paho-mqtt` | `>=1.6.1,<3.0.0` | MQTT client for real-time streaming |
+| `pysocks` | `>=1.7.1,<2.0.0` | SOCKS proxy support for MQTT connections |
+| `pycryptodome` | `>=3.20.0,<4.0.0` | AES decryption for Kohler password tokens |
 
 ### Example Script Dependencies
 

@@ -71,6 +71,17 @@ Detailed documentation is available in the [`docs/`](docs/) directory:
 | [Testing](docs/testing.md) | Test suite documentation — what each test validates and how to run them |
 | [Configuration](docs/configuration.md) | Environment variables, `.env` setup, and library parameters |
 
+## CI Dependency Smoke Tests
+
+`aiophyn` now includes a dedicated smoke-test workflow to catch missing dependency regressions before release:
+
+- Workflow: `.github/workflows/smoke-test.yml`
+- Triggers: `push` (main) and all `pull_request`s
+- Validates both install paths:
+    - Editable install (`pip install -e .`)
+    - Wheel install (`python -m build` + `pip install dist/*.whl`)
+- Smoke imports verify core/runtime dependency availability (`MQTTClient`, `KOHLER_API`, `paho-mqtt`, `pysocks`, `pycryptodome`)
+
 ## Acknowledgements
 
 This work follows the example of @bachya's excellent [aioflo](https://github.com/bachya/aioflo) library for Moen Flo devices.

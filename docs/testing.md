@@ -36,6 +36,21 @@ pip install pytest pytest-asyncio
 
 Tests use `pytest-asyncio` for testing `async` methods. All async test methods are decorated with `@pytest.mark.asyncio`.
 
+## CI Smoke Workflow
+
+In addition to unit tests, CI includes a dependency smoke workflow at `.github/workflows/smoke-test.yml`.
+
+It runs on `push` (main) and `pull_request` and validates:
+
+- Editable install path (`pip install -e .`)
+- Built wheel install path (`python -m build`, `pip install dist/*.whl`)
+- Importability of dependency-sensitive modules and packages:
+    - `aiophyn.mqtt.MQTTClient`
+    - `aiophyn.partners.kohler.KOHLER_API`
+    - `paho.mqtt.client`
+    - `socks`
+    - `Crypto.Cipher.AES`
+
 ---
 
 ## Test Architecture

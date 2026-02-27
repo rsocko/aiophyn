@@ -24,6 +24,16 @@ jobs:
     - name: Build distribution
       run: python -m build
 
+    - name: Smoke test built wheel dependencies
+      run: |
+        pip install dist/*.whl --break-system-packages
+        python -c "import aiophyn"
+        python -c "from aiophyn.mqtt import MQTTClient"
+        python -c "from aiophyn.partners.kohler import KOHLER_API"
+        python -c "import paho.mqtt.client"
+        python -c "import socks"
+        python -c "from Crypto.Cipher import AES"
+
     - name: Publish to PyPI
       env:
         TWINE_USERNAME: __token__

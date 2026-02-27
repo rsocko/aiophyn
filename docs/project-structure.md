@@ -93,7 +93,7 @@ Project metadata and build configuration using Poetry:
 - **Version:** `2026.2.0`
 - **License:** MIT
 - **Python:** `^3.9`
-- **Key dependencies:** `pycognito`, `aiohttp`, `boto3`
+- **Key dependencies:** `pycognito`, `aiohttp`, `boto3`, `paho-mqtt`, `pysocks`, `pycryptodome`
 - **Build backend:** `poetry.core.masonry.api`
 
 ### `pytest.ini`

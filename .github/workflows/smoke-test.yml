@@ -1,0 +1,63 @@
+name: Smoke Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  editable-install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install editable package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Import smoke test (editable)
+        run: |
+          python -c "import aiophyn"
+          python -c "from aiophyn.api import API"
+          python -c "from aiophyn.mqtt import MQTTClient"
+          python -c "from aiophyn.partners.kohler import KOHLER_API"
+          python -c "import paho.mqtt.client"
+          python -c "import socks"
+          python -c "from Crypto.Cipher import AES"
+
+  wheel-install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and install wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build
+          pip install dist/*.whl
+
+      - name: Import smoke test (wheel)
+        run: |
+          python -c "import aiophyn"
+          python -c "from aiophyn.api import API"
+          python -c "from aiophyn.mqtt import MQTTClient"
+          python -c "from aiophyn.partners.kohler import KOHLER_API"
+          python -c "import paho.mqtt.client"
+          python -c "import socks"
+          python -c "from Crypto.Cipher import AES"
