@@ -1,6 +1,12 @@
-"""Run an example script to quickly test."""
+"""Run an example script to quickly test MQTT.
+
+Usage:
+    1. Copy .env.example to .env and fill in your credentials
+    2. Run: python test_mqtt.py
+"""
 import asyncio
 import logging
+
 
 from aiophyn import async_get_api
 from aiophyn.errors import PhynError
@@ -11,7 +17,6 @@ except ImportError:
     raise SystemExit("Copy examples/config.example to examples/config.py and fill in your credentials.")
 
 _LOGGER = logging.getLogger()
-
 
 async def on_message(device_id, data):
     """Display a received MQTT message"""
