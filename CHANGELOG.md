@@ -4,6 +4,8 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Restore upstream's `get_autoshuftoff_status` method name, undoing the unrelated
+  feature-branch rename.
 - Merge upstream `main` through `cb2e32f` (2026.9.1), retaining its MQTT
   disconnect/reconnect fixes and alert filtering.
 - Preserve fixture inventory, water-usage predictions, and event feedback from
@@ -37,11 +39,6 @@ All notable changes to the `aiophyn` library will be documented in this file.
 ## [2026.2.0] — 2026-02-25
 
 ### Breaking Changes
-
-- **`get_autoshuftoff_status` removed** — The misspelled method alias
-  `get_autoshuftoff_status` (note the `f` instead of `t`) has been removed.
-  Callers must migrate to the correctly-spelled `get_autoshutoff_status`.
-  The method behavior and return type (`dict`) are unchanged.
 
 - **`get_device_preferences` return type changed: `dict` → `list[dict]`** —
   The API actually returns a JSON array of preference objects. The old `dict`
@@ -97,7 +94,7 @@ reflect it. However, callers that specifically relied on the `None` type hint
   and `comparison` changed from `Optional[str] = False` to `bool = False`.
   All callers pass booleans, so this is compatible.
 
-- **`get_autoshutoff_status` docstring updated** — Return documentation
+- **`get_autoshuftoff_status` docstring updated** — Return documentation
   changed from "List of dicts with keys: created_ts, device_id, name,
   updated_ts, value" to "Dict with auto_shutoff_enable (bool) and
   auto_shutoff_eligible (int)." The return **type** (`dict`) is unchanged.

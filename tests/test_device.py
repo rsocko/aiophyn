@@ -659,14 +659,15 @@ class TestAutoShutoff:
     """Tests for auto shutoff operations."""
 
     @pytest.mark.asyncio
-    async def test_get_autoshutoff_status(self, device, mock_request):
-        """Test the corrected method name."""
+    async def test_get_autoshuftoff_status(self, device, mock_request):
+        """Preserve the upstream public method name and response."""
         mock_request.return_value = {"auto_shutoff_enable": True}
-        result = await device.get_autoshutoff_status("DEVICE123")
+        result = await device.get_autoshuftoff_status("DEVICE123")
 
-        mock_request.assert_called_once_with(
+        mock_request.assert_awaited_once_with(
             "get", f"{API_BASE}/devices/DEVICE123/auto_shutoff"
         )
+        assert result == {"auto_shutoff_enable": True}
 
     @pytest.mark.asyncio
     async def test_set_autoshutoff_enabled(self, device, mock_request):

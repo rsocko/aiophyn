@@ -180,7 +180,7 @@ class Device:
             "post", f"{API_BASE}/preferences/device/{device_id}", json=data
         )
     
-    async def get_autoshutoff_status(self, device_id: str) -> dict:
+    async def get_autoshuftoff_status(self, device_id: str) -> dict:
         """Get auto shutoff status for a device.
 
         Returns the current auto shutoff configuration including whether

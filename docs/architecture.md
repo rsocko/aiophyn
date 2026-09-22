@@ -92,7 +92,7 @@ Handles all device-level operations — the largest class in the library.
 | `get_away_mode(device_id)` | Get away mode status | `dict` |
 | `enable_away_mode(device_id)` | Enable away mode | `None` |
 | `disable_away_mode(device_id)` | Disable away mode | `None` |
-| `get_autoshutoff_status(device_id)` | Get auto shutoff configuration | `dict` |
+| `get_autoshuftoff_status(device_id)` | Get auto shutoff configuration | `dict` |
 | `set_autoshutoff_enabled(device_id, shutoff_on, time)` | Enable/disable auto shutoff | `dict` |
 | `get_device_preferences(device_id)` | Get all device preferences | `list[dict]` |
 | `set_device_preferences(device_id, data)` | Set device preferences | `None` |
@@ -100,7 +100,7 @@ Handles all device-level operations — the largest class in the library.
 | `run_leak_test(device_id, extended_test)` | Run a standard or extended leak test | `dict` |
 | `get_latest_firmware_info(device_id)` | Get firmware version information | `list[dict]` |
 
-> **Note:** `get_autoshuftoff_status` exists as a backward-compatible alias (preserving the original typo) for `get_autoshutoff_status`.
+> **Note:** `get_autoshuftoff_status` preserves upstream's public method name, including its spelling.
 
 ---
 

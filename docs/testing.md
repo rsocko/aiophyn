@@ -213,7 +213,7 @@ Verifies that top-level imports work correctly.
 #### `TestAutoShutoff` (3 tests)
 | Test | Validates |
 |------|-----------|
-| `test_get_autoshutoff_status` | Correct endpoint URL |
+| `test_get_autoshuftoff_status` | Upstream method name, endpoint URL, and response |
 | `test_set_autoshutoff_enabled` | Enable URL: `.../status/Enable` |
 | `test_set_autoshutoff_disabled_with_time` | Disable with duration: `.../status/Disable/3600` |
 | `test_set_autoshutoff_disabled_no_time` | Disable indefinitely: `.../status/Disable` |
