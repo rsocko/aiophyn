@@ -1,63 +1,45 @@
-name: Smoke Test
+name: Offline tests and packaging
 
 on:
   push:
     branches:
       - main
+      - "feature/**"
+      - "work/**"
+      - "rsocko-*"
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  editable-install-smoke:
+  tests-and-distributions:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12", "3.14"]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install editable package
+      - name: Install Poetry
+        run: pipx install poetry==2.2.1
+
+      - name: Install locked runtime and development dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .
+          poetry env use "$(command -v python)"
+          poetry check --lock
+          poetry sync --with dev
 
-      - name: Import smoke test (editable)
+      - name: Run offline unit and contract tests
         run: |
-          python -c "import aiophyn"
-          python -c "from aiophyn.api import API"
-          python -c "from aiophyn.mqtt import MQTTClient"
-          python -c "from aiophyn import HomeInventory"
-          python -c "import paho.mqtt.client"
-          python -c "import socks"
-          python -c "from Crypto.Cipher import AES"
+          poetry run python -m pip check
+          poetry run python -m pytest tests
 
-  wheel-install-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build and install wheel
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
-          python -m build
-          pip install dist/*.whl
-
-      - name: Import smoke test (wheel)
-        run: |
-          python -c "import aiophyn"
-          python -c "from aiophyn.api import API"
-          python -c "from aiophyn.mqtt import MQTTClient"
-          python -c "from aiophyn import HomeInventory"
-          python -c "import paho.mqtt.client"
-          python -c "import socks"
-          python -c "from Crypto.Cipher import AES"
+      - name: Verify clean wheel, sdist, and source-archive builds
+        run: poetry run python scripts/verify_distribution.py
