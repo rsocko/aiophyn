@@ -61,11 +61,13 @@ for a reproducible installation):
 pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture-usage"
 ```
 
-The current remediation candidate is on `validation/water-fixture-usage`, not
-`main` or `feature/fixture-usage`. It includes the corrected Home Assistant
-authentication dependency and diagnostic harness. Use a reviewed immutable
-commit from that validation branch for paired testing; it is not a published
-release, and its package version still matches upstream's `2026.9.1`.
+The validated remediation is included in `feature/fixture-usage`, which was
+fast-forwarded to `972f16c8fb0ede1a2f3365680a972f70c47b6fe7`.
+`validation/water-fixture-usage` retains that tested checkpoint; it is not a
+separate set of features. The feature branch includes the corrected Home
+Assistant authentication dependency and diagnostic harness. Use a reviewed
+immutable commit for paired testing. These changes have not been promoted to
+`main` or published, and the package version still matches upstream's `2026.9.1`.
 
 For development, use Poetry 2.2.1 and the checked-in dependency lock:
 
