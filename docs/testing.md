@@ -30,26 +30,65 @@ The `pytest.ini` at the repository root configures:
 
 ### Dependencies
 
+Install Poetry 2.2.1 separately, select your Python interpreter with
+`poetry env use`, then install the locked development group:
+
 ```bash
-pip install pytest pytest-asyncio
+poetry check --lock
+poetry sync --with dev
+poetry run python -m pytest tests
 ```
 
-Tests use `pytest-asyncio` for testing `async` methods. All async test methods are decorated with `@pytest.mark.asyncio`.
+Prefix the test commands above with `poetry run` when using this environment.
+The development group declares pytest 8.x and pytest-asyncio 1.2.x, which retain
+Python 3.9 support, plus `build`, `twine`, and conditional `tomli` for packaging
+checks. Tests use `pytest-asyncio` for testing `async` methods.
 
-## CI Smoke Workflow
+The original lock dated back to 2022 and omitted runtime dependencies already
+declared in the manifest. It was migrated with Poetry 2.2.1, retaining unrelated
+pins. Python 3.14 requires newer native-extension packages (`aiohttp`,
+`frozenlist`, `multidict`, `yarl`, and `cffi`) and a newer Black formatter.
+Their required transitive changes and the new development tools are locked too.
+`pycognito` now requires `>=2024.5.1,<2025.0.0`, matching the version required by
+Home Assistant 2026.9.3 through `hass-nabucasa`; its declared Python minimum is
+3.8, so aiophyn retains 3.9. The lock is not a dependency-security audit.
 
-In addition to unit tests, CI includes a dependency smoke workflow at `.github/workflows/smoke-test.yml`.
+## CI and Distribution Verification
 
-It runs on `push` (main) and `pull_request` and validates:
+`.github/workflows/smoke-test.yml` runs the offline unit/contract suite and
+packaging checks on Python 3.9, 3.12, and 3.14. It triggers on all pull requests,
+manual dispatch, and pushes to `main`, `feature/**`, `work/**`, and `rsocko-*`.
+The tests use mocks or a loopback HTTP server, never Phyn credentials or devices.
+Dependency installation requires access to the package index; test/probe
+execution does not contact Phyn.
+Build and install steps respect the machine's configured pip package index;
+they do not disable TLS verification or force direct access to public PyPI.
 
-- Editable install path (`pip install -e .`)
-- Built wheel install path (`python -m build`, `pip install dist/*.whl`)
-- Importability of dependency-sensitive modules and packages:
-    - `aiophyn.mqtt.MQTTClient`
-    - `aiophyn.HomeInventory`
-    - `paho.mqtt.client`
-    - `socks`
-    - `Crypto.Cipher.AES`
+Run the same packaging checks locally:
+
+```bash
+poetry run python -m pip check
+poetry run python scripts/verify_distribution.py
+# Optionally keep only the verified wheel and sdist in an empty directory:
+poetry run python scripts/verify_distribution.py --output-dir dist
+```
+
+The helper checks `pyproject.toml` against `aiophyn.__version__` without importing
+the checkout, builds both distributions, and runs `twine check --strict`.
+It extracts the sdist into a temporary directory outside the checkout and
+rebuilds both artifacts with no Git metadata. Separate clean virtual environments
+install the original wheel and sdist with their declared runtime dependencies,
+run `pip check`, and execute the copied probe using Python isolated mode (`-I`).
+The probe verifies that imports come from that environment's installed
+distribution, not the checkout, and compares installed metadata and module
+versions. It imports supported API/dependency modules and invokes real catalog,
+inventory, usage-event, and legacy `get_autoshuftoff_status` methods through an
+injected mock transport, asserting request routing and timestamp parameters.
+It does not authenticate, create an MQTT connection, or access a real device.
+
+The release workflow uses the same helper and offline tests before uploading
+the verified artifacts. Running the helper itself never publishes anything.
+Version selection and publication remain separate release decisions.
 
 ---
 

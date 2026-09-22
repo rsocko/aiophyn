@@ -17,7 +17,7 @@ Built to support the [Phyn integration for Home Assistant](https://github.com/jo
 - **Firmware info** — current version and upgrade history
 - **Device preferences** — read and set device configuration
 - **Real-time streaming** — MQTT over WebSockets for live device updates
-- **Kohler H2Wise+** — full support via partner authentication bridge
+- **Kohler H2Wise+** — uses the unified Phyn authentication path; the legacy partner bridge is no longer included
 
 ## Quick Start
 
@@ -47,16 +47,27 @@ asyncio.run(main())
 
 ## Installation
 
+Requires Python 3.9 or newer. To install the published release:
+
 ```bash
 pip install aiophyn
 ```
 
-Or install from source for development:
+The fixture-usage feature branch is not necessarily available on PyPI. To try
+that branch explicitly (use a reviewed commit SHA instead of the branch name
+for a reproducible installation):
 
 ```bash
-git clone https://github.com/jordanruthe/aiophyn.git
+pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture-usage"
+```
+
+For development, use Poetry 2.2.1 and the checked-in dependency lock:
+
+```bash
+git clone --branch feature/fixture-usage https://github.com/rsocko/aiophyn.git
 cd aiophyn
-pip install -e .
+poetry sync --with dev
+poetry run python -m pytest tests
 ```
 
 ## Documentation
@@ -71,16 +82,20 @@ Detailed documentation is available in the [`docs/`](docs/) directory:
 | [Testing](docs/testing.md) | Test suite documentation — what each test validates and how to run them |
 | [Configuration](docs/configuration.md) | Environment variables, `.env` setup, and library parameters |
 
-## CI Dependency Smoke Tests
+## CI Tests and Packaging
 
-`aiophyn` now includes a dedicated smoke-test workflow to catch missing dependency regressions before release:
+`.github/workflows/smoke-test.yml` runs on all pull requests and pushes to
+`main`, `feature/**` (including `feature/fixture-usage`), `work/**`, and
+`rsocko-*`. Python 3.9, 3.12, and 3.14 each run the offline unit/contract suite
+against the Poetry editable install, then verify wheel and sdist installations
+in clean environments outside the checkout. No Phyn credentials are required.
 
-- Workflow: `.github/workflows/smoke-test.yml`
-- Triggers: `push` (main) and all `pull_request`s
-- Validates both install paths:
-    - Editable install (`pip install -e .`)
-    - Wheel install (`python -m build` + `pip install dist/*.whl`)
-- Smoke imports verify core/runtime dependency availability (`MQTTClient`, `KOHLER_API`, `paho-mqtt`, `pysocks`, `pycryptodome`)
+Checks cover installed-package provenance, version consistency, supported
+exports (`async_get_api`, `HomeInventory`, `API`, `MQTTClient`), representative
+fixture API calls through an injected offline transport, runtime dependencies,
+`pip check`, strict Twine metadata checks, and rebuilding a source archive
+without Git metadata. Release publishing runs the same checks before upload.
+See [Testing](docs/testing.md) for local commands and dependency-lock details.
 
 ## Acknowledgements
 
