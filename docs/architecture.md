@@ -122,6 +122,26 @@ Feedback uses `POST /water-usage-events/{event_id}/feedback/` with an **ID token
 and JSON `{"fixture_id": 8, "sub_fixture_id": null, "tell_us": null}`. Optional
 values replace the nulls when supplied; the fields are not omitted.
 
+The event method makes one logical GET and returns the decoded payload without
+paging, deduplication, or reconciliation. Server result caps, pagination,
+retention, ordering, boundary inclusivity, open-versus-close timestamp selection,
+and ongoing-event behavior are not established. Empty or absent observations
+do not prove zero historical consumption or deletion.
+
+An event ID is usable in the feedback URL, but stability across corrections,
+splits/merges, or reprocessing is not proven. The nested prediction
+`created_timestamp` is not an established event-wide revision for volume or
+feedback. Neither `latest_*` field names nor a `user-feedback` algorithm label
+prove precedence or server freshness. Replacing a prior observation on a later
+fetch is a consumer's local acceptance policy, not authoritative revision
+ordering.
+
+`fixture_id` denotes a catalog category (`home_inventory_type_id`), not a
+particular household fixture. Separate optional `sub_fixture_id` values can
+reference named instances; labels alone are not stable household identities.
+The diagnostic history comparator uses half-open start-time ownership as a
+local comparison convention, not a claim about server window semantics.
+
 ---
 
 ### `HomeInventory` — [aiophyn/home_inventory.py](../aiophyn/home_inventory.py)
@@ -234,7 +254,9 @@ The top-level `aiophyn` package ([\_\_init\_\_.py](../aiophyn/__init__.py)) expo
 - `async_get_api` — Factory function to create an authenticated `API` instance
 - `HomeInventory` — The home inventory class (for type-hinting convenience)
 
-The root-level [\_\_init\_\_.py](../__init__.py) re-exports these and registers submodule aliases so that `from aiophyn.device import Device` works regardless of the nested package layout.
+Upstream removed the root-level package wrapper. Imports resolve through the
+installed `aiophyn` package; distribution checks verify that provenance outside
+the source checkout.
 
 ---
 

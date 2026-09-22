@@ -255,7 +255,11 @@ async def test_get_state(self, device, mock_request):
 
 ### Sample Data
 
-All mock API response data is defined in `conftest.py` as module-level constants. This data mirrors real Phyn API response structures, captured from actual API calls. Available sample datasets:
+Shared historical response-shape samples are defined in `conftest.py` as
+module-level constants, with sanitized identifiers. Contract and diagnostic
+tests also construct independent synthetic cases. These examples are not raw
+response captures or evidence of correction lifecycle/completeness guarantees.
+Available shared sample datasets:
 
 | Constant | Description |
 |----------|-------------|
@@ -282,14 +286,14 @@ All mock API response data is defined in `conftest.py` as module-level constants
 
 **Test classes:**
 
-#### `TestAPIInit` (6 tests)
+#### `TestAPIInit` (7 tests)
 Tests the `API` class constructor and its attributes. Uses `@pytest.fixture(autouse=True)` to mock `MQTTClient` so tests don't require a running event loop.
 
 | Test | Validates |
 |------|-----------|
-| `test_phyn_brand` | Phyn brand sets `_brand = 0` and stores username |
-| `test_kohler_brand` | Kohler brand sets `_brand = 1` |
-| `test_invalid_brand_raises` | Invalid brand raises `BrandError` |
+| `test_phyn_brand` | Deprecated Phyn brand argument is accepted and username is stored |
+| `test_kohler_brand` | Deprecated Kohler brand argument is accepted without an alternate auth path |
+| `test_invalid_brand_accepted` | Unknown brand is accepted because the argument is ignored |
 | `test_has_device_attribute` | `api.device` is a `Device` instance |
 | `test_has_home_attribute` | `api.home` is a `Home` instance |
 | `test_has_home_inventory_attribute` | `api.home_inventory` is a `HomeInventory` instance |
@@ -304,13 +308,15 @@ Validates the error class inheritance chain.
 | `test_brand_error_is_exception` | `BrandError` inherits from `Exception` |
 | `test_phyn_error_is_exception` | `PhynError` inherits from `Exception` |
 
-#### `TestModuleExports` (2 tests)
+#### `TestModuleExports` (5 cases)
 Verifies that top-level imports work correctly.
 
 | Test | Validates |
 |------|-----------|
 | `test_async_get_api_importable` | `from aiophyn import async_get_api` works |
 | `test_home_inventory_importable` | `from aiophyn import HomeInventory` works |
+| `test_mqtt_annotations_are_postponed_for_python39` | MQTT callback union annotations are deferred |
+| `test_subscribe_callback_preserves_ack_handling` | Tuple/list callback values still acknowledge subscriptions |
 
 ---
 

@@ -4,6 +4,15 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Include unclassified volume in example usage totals and tolerate missing/null
+  predictions; label attribution as predicted, with separate feedback conflicts.
+- Make diagnostic examples import-safe, with explicit local configuration,
+  sanitized reports, and nonzero exits for failed or incomplete checks.
+- Add default-off read-only diagnostics and bounded weekly/daily history
+  comparisons; keep ordinary pytest offline while permitting loopback tests.
+  Live service behavior, retention, and pagination remain unverified.
+- Ignore local credential-file variants and diagnostic artifacts, with offline
+  checks for accidentally tracked private paths.
 - Correct inventory updates to POST with a `list` envelope based on the recorded
   endpoint experiment; add offline HTTP and authentication contracts.
 - Wrap request timeouts and malformed JSON in `RequestError`, preserving causes

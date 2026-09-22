@@ -61,6 +61,12 @@ for a reproducible installation):
 pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture-usage"
 ```
 
+The current remediation candidate is on `validation/water-fixture-usage`, not
+`main` or `feature/fixture-usage`. It includes the corrected Home Assistant
+authentication dependency and diagnostic harness. Use a reviewed immutable
+commit from that validation branch for paired testing; it is not a published
+release, and its package version still matches upstream's `2026.9.1`.
+
 For development, use Poetry 2.2.1 and the checked-in dependency lock:
 
 ```bash
@@ -96,6 +102,13 @@ fixture API calls through an injected offline transport, runtime dependencies,
 `pip check`, strict Twine metadata checks, and rebuilding a source archive
 without Git metadata. Release publishing runs the same checks before upload.
 See [Testing](docs/testing.md) for local commands and dependency-lock details.
+
+Live checks are deselected by default, even when credentials are present.
+The optional read-only harness requires explicit selection and `--run-live`;
+it does not enable inventory changes, feedback, or valve operations. Installing
+the harness does not authorize account access. See
+[local live checks](docs/testing.md#local-opt-in-read-only-checks) for limits
+and safe configuration.
 
 ## Acknowledgements
 

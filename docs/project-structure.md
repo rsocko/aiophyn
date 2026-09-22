@@ -33,19 +33,33 @@ aiophyn/
 │
 ├── examples/                    # Runnable example & validation scripts
 │   ├── .env.example             # Template for credentials configuration
+│   ├── diagnostics.py          # Shared bounded read-only runner & sanitized reports
+│   ├── history.py              # Pure fixed-window history comparisons
+│   ├── test_alerts.py          # Read-only alert diagnostics
 │   ├── test_api.py              # Basic API connectivity test
-│   ├── test_comprehensive.py    # Full API surface validation
+│   ├── test_comprehensive.py    # Selected read-only endpoint diagnostics
 │   ├── test_home_inventory.py   # Home inventory endpoint testing
 │   ├── test_mqtt.py             # MQTT real-time streaming test
 │   └── test_water_usage_events.py  # Water usage events & ML analysis
 │
-└── tests/                       # Automated unit tests (pytest)
+├── scripts/
+│   ├── check_installed.py      # Isolated installed-package provenance & routing
+│   └── verify_distribution.py  # Clean wheel/sdist/no-Git build and install gate
+│
+└── tests/                       # Offline by default; live checks explicitly gated
     ├── __init__.py
     ├── conftest.py              # Fixtures, mocks, and sample API response data
     ├── test_api.py              # API initialization & error hierarchy tests
     ├── test_device.py           # Device method tests (largest test file)
     ├── test_home.py             # Home discovery tests
-    └── test_home_inventory.py   # Home inventory endpoint tests
+    ├── test_home_inventory.py   # Home inventory endpoint tests
+    ├── test_auth_contracts.py   # Real SRP calculations, mocked AWS I/O
+    ├── test_transport_contracts.py # Loopback HTTP contracts
+    ├── test_packaging.py        # Distribution-gate checks
+    ├── test_usage_diagnostics.py # Synthetic predicted-usage accounting
+    ├── test_history_diagnostics.py # Synthetic window comparisons
+    ├── test_live_guards.py      # Offline opt-in, budget & privacy checks
+    └── test_live_readonly.py    # Local opt-in only; deselected by default
 ```
 
 ## Key Directories
@@ -63,13 +77,21 @@ The main Python package containing all library code. This is what gets installed
 
 ### `examples/` — Runnable Example Scripts
 
-Integration test scripts that connect to the live Phyn API. These require real credentials (configured via `.env` file) and exercise the library against the production API. They are not automated tests — they are developer tools for validation and exploration.
+Explicitly invoked scripts can connect to the live Phyn API with locally
+configured credentials. Imports are inert. Read-only diagnostics use process
+variables or an explicitly named `--env-file`, bounded requests, and sanitized
+reports. The separate legacy MQTT example uses `config.py` and logs private
+data. Pure usage/history helpers are also tested offline.
 
 See [examples.md](examples.md) for detailed documentation of each script.
 
 ### `tests/` — Automated Unit Tests
 
-Pytest-based unit tests that validate library behavior using mocked API responses. These do **not** require network access or real credentials. All API responses are simulated using sample data defined in `conftest.py`, which mirrors real Phyn API response structures.
+Default tests use mocks, synthetic data, and loopback HTTP servers; external
+networking is blocked and no credentials are loaded. The optional
+`live_readonly` check requires explicit selection and `--run-live`; it is never
+enabled by ordinary pytest or CI. Historical shared samples establish response
+shapes, not server completeness or revision guarantees.
 
 See [testing.md](testing.md) for detailed documentation of each test file.
 
@@ -95,6 +117,7 @@ Project metadata and build configuration using Poetry:
 Configures pytest:
 - Test discovery path: `tests/`
 - Import mode: `importlib` (avoids package path conflicts)
+- Marker: `live_readonly` (deselected unless explicitly opted in)
 
 ### `LICENSE`
 
