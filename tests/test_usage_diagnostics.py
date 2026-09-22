@@ -5,12 +5,13 @@ import argparse
 import asyncio
 import builtins
 from contextlib import nullcontext
+from datetime import timedelta
 import importlib
 import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 import sys
 
 import pytest
@@ -275,6 +276,304 @@ def synthetic_api(monkeypatch):
     monkeypatch.setattr(diag, "async_get_api", AsyncMock(return_value=api))
     monkeypatch.setattr(diag, "bounded_cognito", lambda budget: nullcontext())
     return api
+
+
+DEVICE_IDS = ("offline-device-one", "offline-device-two")
+HISTORY_START_MS = 1704067200000  # 2024-01-01 UTC
+DAY_MS = 86_400_000
+HISTORY_WINDOWS = [
+    (HISTORY_START_MS, HISTORY_START_MS + 7 * DAY_MS),
+    *[
+        (HISTORY_START_MS + day * DAY_MS, HISTORY_START_MS + (day + 1) * DAY_MS)
+        for day in range(7)
+    ],
+    (HISTORY_START_MS, HISTORY_START_MS + 7 * DAY_MS),
+]
+
+
+@pytest.fixture(params=["same-home", "separate-homes"])
+def multi_device_api(synthetic_api, request):
+    api = synthetic_api
+    groups = (
+        [DEVICE_IDS] if request.param == "same-home" else [(d,) for d in DEVICE_IDS]
+    )
+    api.home.get_homes.return_value = [
+        {
+            "id": f"offline-home-{index}",
+            "devices": [{"device_id": device_id} for device_id in group],
+            "device_ids": list(group),
+        }
+        for index, group in enumerate(groups)
+    ]
+    api.events_by_device = {
+        device_id: [
+            dict(
+                event(flow),
+                open_edge_timestamp=HISTORY_START_MS + 1000,
+                close_edge_timestamp=HISTORY_START_MS + 2000,
+            )
+        ]
+        for device_id, flow in zip(DEVICE_IDS, (2, 9))
+    }
+    api.history_by_device = dict(api.events_by_device)
+
+    async def fetch(device_id, *args, **kwargs):
+        rows = (
+            api.history_by_device[device_id]
+            if kwargs
+            else api.events_by_device[device_id]
+        )
+        if isinstance(rows, Exception):
+            raise rows
+        if kwargs:
+            return [
+                row
+                for row in rows
+                if kwargs["from_ts"] <= row["open_edge_timestamp"] < kwargs["to_ts"]
+            ]
+        return rows
+
+    api.device.get_water_usage_events.side_effect = fetch
+    for method in (
+        "get_state",
+        "get_consumption",
+        "get_device_preferences",
+        "get_latest_firmware_info",
+        "get_away_mode",
+    ):
+        setattr(api.device, method, AsyncMock(return_value={"synthetic": True}))
+    api.alert = SimpleNamespace(
+        get_latest=AsyncMock(return_value={"alerts": []}),
+        get_active_summary=AsyncMock(return_value={"unresolved": 0}),
+    )
+    return api
+
+
+def assert_comprehensive_reads(api, device_id, days, history=False):
+    api.home_inventory.get_fixture_types.assert_awaited_once_with()
+    api.home_inventory.get_device_inventory.assert_awaited_once_with(device_id)
+    for method in (
+        "get_state",
+        "get_device_preferences",
+        "get_latest_firmware_info",
+        "get_away_mode",
+    ):
+        getattr(api.device, method).assert_awaited_once_with(device_id)
+    reads = api.device.get_water_usage_events.await_args_list
+    for read, day in zip(reads, days):
+        assert read.kwargs == {}
+        selected, left, right = read.args
+        assert selected == device_id
+        assert right - left == timedelta(days=day)
+        assert right == reads[0].args[2]
+    api.device.get_consumption.assert_awaited_once_with(
+        device_id, reads[0].args[2].strftime("%Y/%m/%d"), details=True
+    )
+    assert reads[len(days) :] == (
+        [call(device_id, from_ts=left, to_ts=right) for left, right in HISTORY_WINDOWS]
+        if history
+        else []
+    )
+    assert len(reads) == len(days) + (9 if history else 0)
+    api.alert.get_latest.assert_not_awaited()
+    api.alert.get_active_summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_second_device_comprehensive_and_history(multi_device_api):
+    report = await diag.run_diagnostics(
+        diag.Configuration("synthetic", "synthetic", device_id=DEVICE_IDS[1]),
+        "comprehensive",
+        days=(1, 7, 30),
+        history=True,
+        history_start="2024-01-01",
+    )
+    assert report["status"] == "passed"
+    assert all(check["status"] == "passed" for check in report["checks"])
+    assert_comprehensive_reads(
+        multi_device_api, DEVICE_IDS[1], (1, 7, 30), history=True
+    )
+    checks = {check["name"]: check for check in report["checks"]}
+    for day in (1, 7, 30):
+        assert checks[f"events_{day}d"]["usage"]["total_gallons"] == 9
+    assert checks["history"]["total_gallons"] == {
+        "weekly_before": 9,
+        "daily": 9,
+        "weekly_after": 9,
+    }
+    assert checks["history"]["consistent"] is True
+
+
+@pytest.mark.asyncio
+async def test_default_selection_remains_first_device(multi_device_api):
+    report = await diag.run_diagnostics(
+        diag.Configuration("synthetic", "synthetic"), "comprehensive"
+    )
+    assert report["status"] == "passed"
+    assert_comprehensive_reads(multi_device_api, DEVICE_IDS[0], (7,))
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["events_7d"]["usage"]["total_gallons"] == 2
+    assert checks["history"]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_second_device_alerts_select_home_not_account_summary(multi_device_api):
+    from aiophyn.alert import Alert
+
+    homes = multi_device_api.home.get_homes.return_value
+    report = await diag.run_diagnostics(
+        diag.Configuration("synthetic", "synthetic", device_id=DEVICE_IDS[1]),
+        "alerts",
+    )
+    assert report["status"] == "passed"
+    multi_device_api.alert.get_latest.assert_awaited_once_with(
+        "synthetic", homes[-1]["id"], alert_type=Alert.ALERT_TYPES
+    )
+    multi_device_api.alert.get_active_summary.assert_awaited_once_with(
+        "synthetic", "unresolved"
+    )
+    for api_group in (multi_device_api.device, multi_device_api.home_inventory):
+        for method in vars(api_group).values():
+            method.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["comprehensive", "alerts"])
+async def test_unknown_device_fails_before_reads(multi_device_api, mode):
+    report = await diag.run_diagnostics(
+        diag.Configuration("synthetic", "synthetic", device_id="offline-unknown"),
+        mode,
+        history=True,
+        history_start="2024-01-01",
+    )
+    assert report["status"] == "failed"
+    failures = [check for check in report["checks"] if check["status"] == "failed"]
+    assert failures == [
+        {
+            "name": "device_selection",
+            "status": "failed",
+            "reason": "Selected device was not discovered for this account",
+        }
+    ]
+    multi_device_api.home.get_homes.assert_awaited_once_with("synthetic")
+    for api_group in (
+        multi_device_api.device,
+        multi_device_api.home_inventory,
+        multi_device_api.alert,
+    ):
+        for method in vars(api_group).values():
+            method.assert_not_awaited()
+    assert (
+        next(c for c in report["checks"] if c["name"] == "history")["status"]
+        == "skipped"
+    )
+
+
+@pytest.mark.asyncio
+async def test_per_device_usage_history_reports_isolate_shared_event_ids(
+    multi_device_api, tmp_path
+):
+    reports = []
+    snapshots = []
+    for index, device_id in enumerate((*DEVICE_IDS, DEVICE_IDS[0])):
+        multi_device_api.device.get_water_usage_events.reset_mock()
+        report = await diag.run_diagnostics(
+            diag.Configuration("synthetic", "synthetic", device_id=device_id),
+            "usage",
+            history=True,
+            history_start="2024-01-01",
+        )
+        assert report["status"] == "passed"
+        checks = {check["name"]: check for check in report["checks"]}
+        expected = 2 if device_id == DEVICE_IDS[0] else 9
+        assert checks["events_7d"]["usage"]["total_gallons"] == expected
+        assert checks["events_7d"]["usage"]["event_count"] == 1
+        assert checks["history"]["total_gallons"] == dict.fromkeys(
+            ("weekly_before", "daily", "weekly_after"), expected
+        )
+        assert checks["history"]["unique_counts"] == dict.fromkeys(
+            ("weekly_before", "daily", "weekly_after"), 1
+        )
+        assert checks["history"]["consistent"] is True
+        reads = multi_device_api.device.get_water_usage_events.await_args_list
+        assert len(reads) == 10
+        assert reads[0].args[0] == device_id
+        assert reads[1:] == [
+            call(device_id, from_ts=left, to_ts=right)
+            for left, right in HISTORY_WINDOWS
+        ]
+        path = tmp_path / f"report-{index}.json"
+        diag.write_report(report, path)
+        snapshots.append(json.loads(path.read_text(encoding="utf-8")))
+        reports.append(report)
+    assert reports == snapshots
+    assert reports[0] == reports[2]
+    assert reports[0] != reports[1]
+    assert reports[0] is not reports[2]
+    for raw_id in (*DEVICE_IDS, "synthetic-event"):
+        assert raw_id not in json.dumps(reports)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["usage", "history"])
+@pytest.mark.parametrize("outcome", ["empty", "failure"])
+async def test_empty_or_failed_device_does_not_contaminate_next_run(
+    multi_device_api, stage, outcome
+):
+    responses = (
+        multi_device_api.events_by_device
+        if stage == "usage"
+        else multi_device_api.history_by_device
+    )
+    responses[DEVICE_IDS[0]] = (
+        [] if outcome == "empty" else RuntimeError("synthetic-private-failure")
+    )
+    reports = []
+    for device_id in DEVICE_IDS:
+        multi_device_api.device.get_water_usage_events.reset_mock()
+        report = await diag.run_diagnostics(
+            diag.Configuration("synthetic", "synthetic", device_id=device_id),
+            "usage",
+            history=True,
+            history_start="2024-01-01",
+        )
+        reads = multi_device_api.device.get_water_usage_events.await_args_list
+        assert reads
+        assert all(read.args[0] == device_id for read in reads)
+        if device_id == DEVICE_IDS[0] and outcome == "failure":
+            assert len(reads) == (1 if stage == "usage" else 2)
+        else:
+            assert len(reads) == 10
+            assert reads[1:] == [
+                call(device_id, from_ts=left, to_ts=right)
+                for left, right in HISTORY_WINDOWS
+            ]
+        reports.append(report)
+    affected, successful = [
+        {check["name"]: check for check in report["checks"]} for report in reports
+    ]
+    name = "events_7d" if stage == "usage" else "history"
+    assert affected[name]["status"] == ("empty" if outcome == "empty" else "failed")
+    assert reports[0]["status"] == ("passed" if outcome == "empty" else "failed")
+    if outcome == "empty":
+        if stage == "usage":
+            assert affected[name]["usage"]["total_gallons"] == 0
+        else:
+            assert affected[name]["total_gallons"] == dict.fromkeys(
+                ("weekly_before", "daily", "weekly_after"), 0
+            )
+    else:
+        assert "usage" not in affected[name]
+        assert "total_gallons" not in affected[name]
+        if stage == "usage":
+            assert affected["history"]["status"] == "skipped"
+    assert reports[1]["status"] == "passed"
+    assert successful["events_7d"]["usage"]["total_gallons"] == 9
+    assert successful["history"]["total_gallons"] == dict.fromkeys(
+        ("weekly_before", "daily", "weekly_after"), 9
+    )
+    assert successful["history"]["consistent"] is True
+    assert "synthetic-private-failure" not in json.dumps(reports)
 
 
 @pytest.mark.asyncio

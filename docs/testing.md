@@ -157,6 +157,20 @@ and redacted reports. Ignore tests use `git check-ignore` for representative
 root/nested private paths and `git ls-files` to catch already tracked secrets
 by path; this is not a content-secret scanner.
 
+Multi-device regressions in `test_usage_diagnostics.py` explicitly select the
+second synthetic device in both same-home and separate-home accounts, covering
+comprehensive reads, fixed history windows and the selected home's alerts.
+Active alert summaries remain account-wide. Tests preserve default-first
+selection, reject unknown selections before device reads, and keep per-device
+usage/history reports separate even when event IDs overlap or one device returns
+empty data or fails. `test_transport_contracts.py` exercises the real HTTP
+transport against loopback with alternating and overlapping concurrent inventory,
+event and state reads through one API object, checking exact paths, queries and
+distinct responses. This is offline routing/report isolation evidence, not
+physical multi-device validation, a cross-device history ledger, or a claim about
+server caching. No automatic all-device live loop or request-budget increase is
+introduced.
+
 The older shared samples below document historical response structures, not a
 fresh live contract proof. The inventory POST envelope follows the historical
 experiment evidence pinned by the remediation work; no live write was attempted

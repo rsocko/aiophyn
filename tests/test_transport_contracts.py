@@ -32,8 +32,10 @@ async def transport(monkeypatch):
         requests=[],
         statuses=[200],
         payload={"synthetic": True},
+        responses=None,
         raw_body=None,
         hold=False,
+        expected_requests=1,
         entered=asyncio.Event(),
         release=asyncio.Event(),
     )
@@ -49,7 +51,8 @@ async def transport(monkeypatch):
                 "body": json.loads(body) if body else None,
             }
         )
-        server.entered.set()
+        if len(server.requests) >= server.expected_requests:
+            server.entered.set()
         if server.hold:
             await server.release.wait()
         status = server.statuses[0]
@@ -59,6 +62,9 @@ async def transport(monkeypatch):
             return web.Response(
                 status=status, text=server.raw_body, content_type="application/json"
             )
+        if server.responses is not None:
+            key = (request.path, tuple(sorted(request.query.items())))
+            return web.json_response(server.responses[key], status=status)
         return web.json_response(server.payload, status=status)
 
     app = web.Application()
@@ -130,6 +136,84 @@ async def test_inventory_reads(transport, method, args, path, response):
     assert result == response
     assert len(transport.server.requests) == 1
     assert_request(transport.server.requests[0], "GET", path)
+    transport.auth.assert_not_awaited()
+
+
+@pytest.mark.parametrize("concurrent", [False, True], ids=["alternating", "concurrent"])
+async def test_two_device_reads_keep_wire_routes_and_results_isolated(
+    transport, concurrent
+):
+    devices = ("offline-device-one", "offline-device-two")
+    responses = {}
+    routes = {}
+    for device_id, volume, pressure in zip(devices, (2, 9), (41, 62)):
+        routes[device_id, "inventory"] = (
+            f"/home-inventory/device/{device_id}",
+            (),
+        )
+        routes[device_id, "events"] = (
+            "/water-usage-events",
+            tuple(
+                sorted(
+                    [
+                        ("device_id", device_id),
+                        ("from_ts", "1704067200000"),
+                        ("to_ts", "1704153600000"),
+                    ]
+                )
+            ),
+        )
+        routes[device_id, "state"] = (f"/devices/{device_id}/state", ())
+        responses[routes[device_id, "inventory"]] = {
+            "list": [{"home_inventory_type_id": 7, "count": volume}]
+        }
+        responses[routes[device_id, "events"]] = [
+            {"id": "shared-synthetic-event", "total_flow": volume}
+        ]
+        responses[routes[device_id, "state"]] = {
+            "device_id": device_id,
+            "pressure": pressure,
+        }
+    transport.server.responses = responses
+    selected_reads = [
+        (device_id, kind)
+        for kind in ("inventory", "events", "state")
+        for device_id in (*devices, *devices)
+    ]
+
+    async def read(device_id, kind):
+        if kind == "inventory":
+            return await transport.api.home_inventory.get_device_inventory(device_id)
+        if kind == "events":
+            return await transport.api.device.get_water_usage_events(
+                device_id, from_ts=1704067200000, to_ts=1704153600000
+            )
+        return await transport.api.device.get_state(device_id)
+
+    if concurrent:
+        transport.server.hold = True
+        transport.server.expected_requests = len(selected_reads)
+        batch = asyncio.gather(*(read(*selection) for selection in selected_reads))
+        try:
+            await asyncio.wait_for(transport.server.entered.wait(), 2)
+            assert not batch.done()
+        finally:
+            transport.server.release.set()
+            results = await batch
+    else:
+        results = [await read(*selection) for selection in selected_reads]
+
+    expected_routes = [routes[selection] for selection in selected_reads]
+    assert results == [responses[route] for route in expected_routes]
+    actual_routes = [
+        (request["path"], tuple(sorted(request["query"])))
+        for request in transport.server.requests
+    ]
+    assert sorted(actual_routes) == sorted(expected_routes)
+    if not concurrent:
+        assert actual_routes == expected_routes
+    for request, (path, query) in zip(transport.server.requests, actual_routes):
+        assert_request(request, "GET", path, query=query)
     transport.auth.assert_not_awaited()
 
 
