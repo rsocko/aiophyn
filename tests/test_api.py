@@ -74,6 +74,21 @@ class TestErrors:
 class TestModuleExports:
     """Tests for package-level exports."""
 
+    def test_mqtt_annotations_are_postponed_for_python39(self):
+        from aiophyn.mqtt import MQTTClient
+
+        assert isinstance(MQTTClient._on_subscribe.__annotations__["granted_qos"], str)
+        assert isinstance(MQTTClient._on_subscribe.__annotations__["properties"], str)
+
+    @pytest.mark.parametrize("granted_qos", [(0,), []])
+    def test_subscribe_callback_preserves_ack_handling(self, granted_qos):
+        from aiophyn.mqtt import MQTTClient
+
+        mqtt = MQTTClient.__new__(MQTTClient)
+        mqtt.pending_acks = {7: "offline-topic"}
+        mqtt._on_subscribe(MagicMock(), None, 7, granted_qos)
+        assert mqtt.pending_acks == {}
+
     def test_async_get_api_importable(self):
         from aiophyn import async_get_api
         assert callable(async_get_api)

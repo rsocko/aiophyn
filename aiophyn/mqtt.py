@@ -1,4 +1,5 @@
 """ Module providing a MQTT provider """
+from __future__ import annotations
 
 import asyncio
 import logging
