@@ -63,8 +63,8 @@ pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture
 
 The validated remediation is included in `feature/fixture-usage`, which was
 fast-forwarded to `972f16c8fb0ede1a2f3365680a972f70c47b6fe7`.
-`validation/water-fixture-usage` retains that tested checkpoint; it is not a
-separate set of features. The feature branch includes the corrected Home
+The temporary validation branch was removed after promotion; the tested
+checkpoint remains reachable through the feature branch. It includes the corrected Home
 Assistant authentication dependency and diagnostic harness. Use a reviewed
 immutable commit for paired testing. These changes have not been promoted to
 `main` or published, and the package version still matches upstream's `2026.9.1`.
