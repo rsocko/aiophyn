@@ -1,380 +1,183 @@
-"""Test water usage events with fixture predictions.
+"""Predicted fixture usage, not ground truth. See docs/examples.md."""
 
-This script validates the get_water_usage_events() method added to the aiophyn
-Device class. It fetches recent water usage events and displays the fixture
-predictions returned by the Phyn ML pipeline.
-
-Derived from: ideation/experiments/home-automation/phyn-api-exploration/scripts/
-  - water_usage_events_test.py
-  - fixture_analyzer.py
-
-Usage:
-    1. Copy .env.example to .env and fill in your credentials
-    2. Run: python test_water_usage_events.py
-       Optional: python test_water_usage_events.py --days 1,7,30 --low-confidence-threshold 0.7
-    3. Output is saved to output/test_water_usage_events_<timestamp>.json
-"""
 import argparse
-import asyncio
-import json
-import logging
-import os
-import sys
+import math
 from collections import defaultdict
-from datetime import datetime, timedelta
-from pathlib import Path
-
-from aiohttp import ClientSession
-from dotenv import load_dotenv
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from aiophyn import async_get_api
-from aiophyn.errors import PhynError
-
-_LOGGER = logging.getLogger()
-
-load_dotenv()
-
-USERNAME = os.getenv("PHYN_USERNAME")
-PASSWORD = os.getenv("PHYN_PASSWORD")
-BRAND = os.getenv("PHYN_BRAND", "phyn")
-DEVICE_ID = os.getenv("PHYN_DEVICE_ID")
-
-OUTPUT_DIR = Path(__file__).parent / "output"
-
-DEFAULT_LOW_CONFIDENCE_THRESHOLD = 0.70
-DEFAULT_AMBIGUITY_GAP_THRESHOLD = 0.15
-DEFAULT_MAX_REVIEW_EVENTS = 10
-DEFAULT_DAY_RANGES = [1, 7, 30]
+from decimal import Decimal
 
 
-def _fmt_ts_millis(ts_millis) -> str:
-    """Format millisecond timestamp into ISO datetime."""
+class PayloadError(ValueError):
+    """A response cannot be interpreted without inventing data."""
+
+
+def number(value, field, maximum=None):
+    """Validate finite, nonnegative API numbers without echoing private values."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise PayloadError(f"{field} must be a finite nonnegative number")
     try:
-        if ts_millis is None:
-            return "N/A"
-        return datetime.fromtimestamp(int(ts_millis) / 1000).isoformat()
-    except (TypeError, ValueError, OSError):
-        return "N/A"
+        result = float(value)
+    except (ValueError, OverflowError):
+        raise PayloadError(f"{field} must be a finite nonnegative number") from None
+    if not math.isfinite(result) or result < 0:
+        raise PayloadError(f"{field} must be a finite nonnegative number")
+    if maximum is not None and result > maximum:
+        raise PayloadError(f"{field} is outside the supported range")
+    return result
 
 
-def _extract_event_id(event: dict) -> str:
-    """Return event identifier from known API fields."""
-    return str(event.get("id") or event.get("event_id") or "unknown")
+def object_or_empty(value, field):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise PayloadError(f"{field} must be an object or null")
+    return value
 
 
-def _classify_event_quality(
-    event: dict,
-    low_confidence_threshold: float,
-    ambiguity_gap_threshold: float,
-) -> dict:
-    """Classify ML quality signals for one water usage event."""
+def _classify_event_quality(event, low_confidence_threshold, ambiguity_gap_threshold):
+    low = number(low_confidence_threshold, "low confidence threshold", 1)
+    ambiguity = number(ambiguity_gap_threshold, "ambiguity gap threshold", 1)
+    if not isinstance(event, dict):
+        raise PayloadError("Each event must be an object")
+    flow = number(event.get("total_flow"), "total_flow")
+    prediction = object_or_empty(
+        event.get("latest_suggested_fixtures_result"),
+        "latest_suggested_fixtures_result",
+    )
+    suggestions = prediction.get("suggested_fixtures")
+    if suggestions is None:
+        suggestions = []
+    if not isinstance(suggestions, list):
+        raise PayloadError("suggested_fixtures must be a list or null")
+    feedback = object_or_empty(
+        event.get("latest_user_feedback"), "latest_user_feedback"
+    )
+    confidences = []
+    for suggestion in suggestions:
+        if not isinstance(suggestion, dict):
+            raise PayloadError("Each suggested fixture must be an object")
+        confidences.append(
+            number(suggestion.get("confidence_score"), "confidence_score", 1)
+        )
+    if any(right > left for left, right in zip(confidences, confidences[1:])):
+        raise PayloadError("suggested_fixtures must be ordered by confidence")
     result = {
-        "event_id": _extract_event_id(event),
-        "timestamp": event.get("open_edge_timestamp"),
-        "total_flow": event.get("total_flow", 0.0),
+        "total_flow": flow,
         "top_fixture": "Unknown",
-        "top_confidence": 0.0,
+        "top_confidence": None,
         "algorithm": "unknown",
         "confidence_gap": None,
         "is_low_confidence": False,
         "is_ambiguous": False,
-        "has_user_feedback": False,
-        "needs_review": False,
+        "has_user_feedback": bool(feedback),
+        "feedback_conflict": False,
         "review_reasons": [],
     }
-
-    fixtures_result = event.get("latest_suggested_fixtures_result", {}) or {}
-    suggested = fixtures_result.get("suggested_fixtures", []) or []
-    user_feedback = event.get("latest_user_feedback", {}) or {}
-
-    result["has_user_feedback"] = bool(user_feedback)
-
-    if not suggested:
-        result["needs_review"] = True
-        result["review_reasons"].append("no_suggestions")
-        return result
-
-    top = suggested[0]
-    top_confidence = float(top.get("confidence_score") or 0)
-    result["top_fixture"] = top.get("fixture_name", "Unknown")
-    result["top_confidence"] = top_confidence
-    result["algorithm"] = top.get("prediction_algorithm", "unknown")
-    result["is_low_confidence"] = top_confidence < low_confidence_threshold
-
-    if len(suggested) > 1:
-        second_confidence = float(suggested[1].get("confidence_score") or 0)
-        gap = top_confidence - second_confidence
-        result["confidence_gap"] = gap
-        result["is_ambiguous"] = gap < ambiguity_gap_threshold
-
-    if result["is_low_confidence"]:
-        result["review_reasons"].append("low_confidence")
-    if result["is_ambiguous"]:
-        result["review_reasons"].append("ambiguous_top2")
-    if result["has_user_feedback"]:
-        result["review_reasons"].append("has_user_feedback")
-
-    result["needs_review"] = bool(result["review_reasons"])
+    reasons = result["review_reasons"]
+    if not suggestions:
+        reasons.append("no_suggestions")
+    else:
+        top = suggestions[0]
+        name = top.get("fixture_name")
+        if name is not None and not isinstance(name, str):
+            raise PayloadError("fixture_name must be a string or null")
+        result["top_fixture"] = name or "Unknown"
+        result["top_confidence"] = confidences[0]
+        algorithm = top.get("prediction_algorithm") or "unknown"
+        if not isinstance(algorithm, str):
+            raise PayloadError("prediction_algorithm must be a string or null")
+        result["algorithm"] = algorithm
+        result["is_low_confidence"] = confidences[0] < low
+        if len(confidences) > 1:
+            # Decimal avoids binary rounding at the strict threshold boundary.
+            gap = Decimal(str(confidences[0])) - Decimal(str(confidences[1]))
+            result["confidence_gap"] = float(gap)
+            result["is_ambiguous"] = gap < Decimal(str(ambiguity))
+        result["feedback_conflict"] = (
+            feedback.get("fixture_id") is not None
+            and top.get("fixture_id") is not None
+            and str(feedback["fixture_id"]) != str(top["fixture_id"])
+        )
+        if result["is_low_confidence"]:
+            reasons.append("low_confidence")
+        if result["is_ambiguous"]:
+            reasons.append("ambiguous_top2")
+    if feedback:
+        reasons.append("has_user_feedback")
+    if result["feedback_conflict"]:
+        reasons.append("feedback_conflict")
+    result["needs_review"] = bool(reasons)
     return result
 
 
-def _parse_day_ranges(value: str) -> list[int]:
-    """Parse comma-separated day ranges into sorted unique positive ints."""
+def summarize_usage(
+    events, low_confidence_threshold=0.70, ambiguity_gap_threshold=0.15
+):
+    """Attribute the full event volume to its first prediction, including Unknown."""
+    number(low_confidence_threshold, "low confidence threshold", 1)
+    number(ambiguity_gap_threshold, "ambiguity gap threshold", 1)
+    if not isinstance(events, list):
+        raise PayloadError("water usage events must be a list")
+    buckets = defaultdict(lambda: {"volumes": [], "event_count": 0, "confidences": []})
+    quality = []
+    for event in events:
+        item = _classify_event_quality(
+            event, low_confidence_threshold, ambiguity_gap_threshold
+        )
+        quality.append(item)
+        bucket = buckets[item["top_fixture"]]
+        bucket["volumes"].append(item["total_flow"])
+        bucket["event_count"] += 1
+        if item["top_confidence"] is not None:
+            bucket["confidences"].append(item["top_confidence"])
+    fixtures = {
+        name: {
+            "total_gallons": math.fsum(bucket["volumes"]),
+            "event_count": bucket["event_count"],
+            "average_confidence": (
+                math.fsum(bucket["confidences"]) / len(bucket["confidences"])
+                if bucket["confidences"]
+                else None
+            ),
+        }
+        for name, bucket in buckets.items()
+    }
+    total = math.fsum(item["total_flow"] for item in quality)
+    algorithms = defaultdict(int)
+    for item in quality:
+        algorithms[item["algorithm"]] += 1
+    return {
+        "label": "Predicted fixture usage",
+        "status": "empty" if not events else "passed",
+        "event_count": len(events),
+        "total_gallons": total,
+        "fixtures": fixtures,
+        "algorithm_counts": dict(algorithms),
+        "low_confidence_events": sum(q["is_low_confidence"] for q in quality),
+        "ambiguous_events": sum(q["is_ambiguous"] for q in quality),
+        "feedback_events": sum(q["has_user_feedback"] for q in quality),
+        "feedback_conflicts": sum(q["feedback_conflict"] for q in quality),
+        "review_events": sum(q["needs_review"] for q in quality),
+    }
+
+
+def _parse_day_ranges(value):
     try:
-        parts = [int(v.strip()) for v in value.split(",") if v.strip()]
-    except ValueError as err:
-        raise argparse.ArgumentTypeError("--days must be comma-separated integers") from err
-
-    valid = sorted({p for p in parts if p > 0})
-    if not valid:
-        raise argparse.ArgumentTypeError("--days must include at least one positive integer")
-    return valid
-
-
-def parse_args() -> argparse.Namespace:
-    """Parse CLI options for developer validation controls."""
-    parser = argparse.ArgumentParser(description="Validate water usage event ML classifications")
-    parser.add_argument(
-        "--device-id",
-        default=None,
-        help="Optional single device id override (defaults to PHYN_DEVICE_ID env, then all discovered devices)",
-    )
-    parser.add_argument(
-        "--days",
-        type=_parse_day_ranges,
-        default=DEFAULT_DAY_RANGES,
-        help="Comma-separated day ranges to analyze (default: 1,7,30)",
-    )
-    parser.add_argument(
-        "--low-confidence-threshold",
-        type=float,
-        default=DEFAULT_LOW_CONFIDENCE_THRESHOLD,
-        help="Threshold below which top predictions are flagged (default: 0.70)",
-    )
-    parser.add_argument(
-        "--ambiguity-gap-threshold",
-        type=float,
-        default=DEFAULT_AMBIGUITY_GAP_THRESHOLD,
-        help="Top-2 confidence gap threshold for ambiguity flagging (default: 0.15)",
-    )
-    parser.add_argument(
-        "--max-review-events",
-        type=int,
-        default=DEFAULT_MAX_REVIEW_EVENTS,
-        help="Max review candidate events to print per range (default: 10)",
-    )
-    return parser.parse_args()
+        parts = [int(v.strip()) for v in value.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "--days must be comma-separated integers"
+        ) from None
+    if not parts or any(p < 1 or p > 31 for p in parts) or len(set(parts)) > 3:
+        raise argparse.ArgumentTypeError(
+            "--days permits up to three ranges of 1-31 days"
+        )
+    return sorted(set(parts))
 
 
-async def main(args: argparse.Namespace) -> None:
-    """Test water usage events retrieval and fixture predictions."""
-    logging.basicConfig(level=logging.INFO)
+if __name__ == "__main__":
+    if __package__:
+        from .diagnostics import cli
+    else:
+        from diagnostics import cli
 
-    if not USERNAME or not PASSWORD:
-        print("ERROR: Set PHYN_USERNAME and PHYN_PASSWORD in .env file")
-        return
-
-    print("=" * 70)
-    print("WATER USAGE EVENTS - FIXTURE PREDICTIONS TEST")
-    print("=" * 70)
-
-    captured: dict = {"timestamp": datetime.now().isoformat(), "responses": {}}
-
-    async with ClientSession() as session:
-        try:
-            # Authenticate
-            print(f"\nConnecting as {USERNAME}...")
-            api = await async_get_api(
-                USERNAME, PASSWORD, phyn_brand=BRAND, session=session
-            )
-            print("Authenticated successfully")
-
-            # Discover devices
-            homes = await api.home.get_homes(USERNAME)
-            devices = []
-            for home in homes:
-                for device in home.get("devices", []):
-                    did = device.get("device_id")
-                    if did:
-                        devices.append(did)
-
-            selected_device = args.device_id or DEVICE_ID
-            if selected_device:
-                devices = [selected_device]
-
-            print(f"Testing devices: {devices}")
-
-            now = datetime.now()
-
-            # Test multiple time ranges
-            ranges = [(f"Last {day_count} day{'s' if day_count != 1 else ''}", timedelta(days=day_count)) for day_count in args.days]
-
-            for device_id in devices:
-                print(f"\n{'=' * 70}")
-                print(f"DEVICE: {device_id}")
-                print(f"{'=' * 70}")
-
-                for range_name, delta in ranges:
-                    from_dt = now - delta
-                    to_dt = now
-
-                    print(f"\n--- {range_name} ---")
-                    print(f"  From: {from_dt.isoformat()}")
-                    print(f"  To:   {to_dt.isoformat()}")
-
-                    events = await api.device.get_water_usage_events(
-                        device_id, from_dt, to_dt
-                    )
-                    captured["responses"].setdefault(device_id, {})
-                    captured["responses"][device_id][range_name] = {
-                        "from": from_dt.isoformat(),
-                        "to": to_dt.isoformat(),
-                        "event_count": len(events),
-                        "events": events,
-                    }
-
-                    print(f"  Events found: {len(events)}")
-
-                    if not events:
-                        continue
-
-                    # Show sample event structure
-                    if range_name == "Last 24 hours" and events:
-                        print(f"\n  Sample event structure:")
-                        print(f"  {json.dumps(events[0], indent=4)[:500]}")
-
-                    # Analyze fixtures
-                    fixture_usage = defaultdict(
-                        lambda: {"total_gallons": 0.0, "event_count": 0, "confidences": []}
-                    )
-                    algorithm_counts = defaultdict(int)
-                    quality_results = []
-
-                    for event in events:
-                        total_flow = event.get("total_flow", 0)
-                        fixtures_result = event.get(
-                            "latest_suggested_fixtures_result", {}
-                        )
-                        suggested = fixtures_result.get("suggested_fixtures", [])
-
-                        if suggested:
-                            top = suggested[0]
-                            fixture_name = top.get("fixture_name", "Unknown")
-                            confidence = top.get("confidence_score", 0)
-
-                            fixture_usage[fixture_name]["total_gallons"] += total_flow
-                            fixture_usage[fixture_name]["event_count"] += 1
-                            fixture_usage[fixture_name]["confidences"].append(confidence)
-
-                            algorithm = top.get("prediction_algorithm", "unknown")
-                            algorithm_counts[algorithm] += 1
-
-                        quality_results.append(
-                            _classify_event_quality(
-                                event,
-                                args.low_confidence_threshold,
-                                args.ambiguity_gap_threshold,
-                            )
-                        )
-
-                    total_gallons = sum(
-                        f["total_gallons"] for f in fixture_usage.values()
-                    )
-
-                    print(f"\n  Usage by fixture ({range_name}):")
-                    print(
-                        f"  {'Fixture':<25} {'Gallons':>10} {'Events':>8} {'Avg Conf':>10}"
-                    )
-                    print(f"  {'-' * 25} {'-' * 10} {'-' * 8} {'-' * 10}")
-
-                    sorted_fixtures = sorted(
-                        fixture_usage.items(),
-                        key=lambda x: x[1]["total_gallons"],
-                        reverse=True,
-                    )
-
-                    for fixture_name, data in sorted_fixtures:
-                        avg_conf = (
-                            sum(data["confidences"]) / len(data["confidences"])
-                            if data["confidences"]
-                            else 0
-                        )
-                        print(
-                            f"  {fixture_name:<25} {data['total_gallons']:>9.2f}g "
-                            f"{data['event_count']:>7} {avg_conf:>9.1%}"
-                        )
-
-                    print(f"\n  Total: {total_gallons:.2f} gallons")
-
-                    # Classification quality summary
-                    low_conf_events = [q for q in quality_results if q["is_low_confidence"]]
-                    ambiguous_events = [q for q in quality_results if q["is_ambiguous"]]
-                    feedback_events = [q for q in quality_results if q["has_user_feedback"]]
-                    review_events = [q for q in quality_results if q["needs_review"]]
-
-                    print(f"\n  Classification quality ({range_name}):")
-                    print(
-                        f"    Low confidence (<{args.low_confidence_threshold:.0%}): "
-                        f"{len(low_conf_events)}/{len(events)}"
-                    )
-                    print(
-                        f"    Ambiguous top-2 (gap < {args.ambiguity_gap_threshold:.2f}): "
-                        f"{len(ambiguous_events)}/{len(events)}"
-                    )
-                    print(
-                        f"    Events with user feedback: "
-                        f"{len(feedback_events)}/{len(events)}"
-                    )
-
-                    if algorithm_counts:
-                        print("    Top-prediction algorithms:")
-                        for alg, cnt in sorted(
-                            algorithm_counts.items(), key=lambda x: x[1], reverse=True
-                        ):
-                            pct = cnt / len(events) if events else 0
-                            print(f"      - {alg}: {cnt} ({pct:.1%})")
-
-                    if review_events:
-                        print(
-                            f"    Review candidates (up to {args.max_review_events} events):"
-                        )
-                        review_sorted = sorted(
-                            review_events,
-                            key=lambda x: (
-                                x["top_confidence"],
-                                x["timestamp"] or 0,
-                            ),
-                        )
-                        for candidate in review_sorted[:args.max_review_events]:
-                            reasons = ",".join(candidate["review_reasons"])
-                            gap = candidate["confidence_gap"]
-                            gap_txt = f", gap={gap:.2f}" if gap is not None else ""
-                            print(
-                                "      - "
-                                f"{candidate['event_id']} @ {_fmt_ts_millis(candidate['timestamp'])}: "
-                                f"{candidate['top_fixture']} conf={candidate['top_confidence']:.1%}"
-                                f"{gap_txt}, reasons={reasons}, flow={candidate['total_flow']}g"
-                            )
-
-            print("\nTest complete.")
-
-        except PhynError as err:
-            _LOGGER.error("There was an error: %s", err)
-            captured["error"] = str(err)
-
-    def _save_output(data: dict) -> Path:
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = OUTPUT_DIR / f"test_water_usage_events_{ts}.json"
-        path.write_text(json.dumps(data, indent=2, default=str))
-        print(f"\nOutput saved to {path}")
-        return path
-
-    _save_output(captured)
-
-
-asyncio.run(main(parse_args()))
+    raise SystemExit(cli("usage"))

@@ -1,12 +1,15 @@
 # Test Suite
 
-The `tests/` directory contains automated unit tests using [pytest](https://docs.pytest.org/). All tests run offline using mocked API responses — no network access or real credentials are needed.
+The default `tests/` suite runs offline with mocks and loopback HTTP servers.
+No credentials are needed. Local live checks are marked and **deselected by
+default**, including when CI runs `python -m pytest tests` and even if process
+credentials happen to exist. Default collection does not load environment files.
 
 ## Running Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all offline tests
+python -m pytest
 
 # Run all tests with verbose output
 pytest -v
@@ -27,6 +30,137 @@ pytest -s
 The `pytest.ini` at the repository root configures:
 - **Test path:** `tests/`
 - **Import mode:** `importlib` (avoids path conflicts with the nested `aiophyn/aiophyn/` structure)
+- **Marker:** `live_readonly`, enabled only by explicit `--run-live` and selection
+
+`tests/conftest.py` blocks external DNS and IPv4/IPv6 socket connections during
+collection and offline tests, including accidental Phyn or AWS login attempts.
+Loopback remains available to the real HTTP transport contract tests. Only the
+explicitly selected live fixture temporarily permits external networking; merely
+passing `--run-live` does not unguard unmarked tests. This is a regression guard,
+not an operating-system sandbox: independently launched subprocesses or other
+transport implementations need their own protection. Child pytest invocations
+load the same guard.
+
+## Local opt-in read-only checks
+
+```powershell
+# Offline, noninteractive, no secret-file loading:
+python -m pytest
+python -m pytest tests
+
+# Only after the account owner explicitly requests a local live run:
+python -m pytest -m live_readonly --run-live --env-file .env.live -s
+```
+
+See [configuration](configuration.md) for process variables and optional
+python-dotenv installation. `--env-file` without `--run-live` is an error.
+An explicit live selection with absent credentials, a missing file/dependency,
+or placeholder values fails instead of reporting a green skip. `--run-live`
+without selected live tests is also an error. There is no interactive credential
+prompt or automatic credential discovery.
+
+The one local test authenticates, discovers devices, checks fixture catalog and
+inventory shapes, and checks event IDs, timestamps, numeric fields and
+prediction containers. One selected device is used (the first discovered device
+unless explicitly configured). There are no inventory/feedback mutations,
+valve commands, leak tests, merges, deletes or Home Assistant statistics changes.
+`--run-live` never enables writes. `--run-live-writes` is an unsupported stub
+that **errors**; mutation approval and a restoration policy would need a
+separate design. Feedback, merge and deletion operations are not claimed to be
+reversible.
+
+The harness uses the same sanitized diagnostic runner as the examples:
+
+| Limit | Enforcement |
+|-------|-------------|
+| Shared request-attempt cap | 24 combined Cognito authentication and Phyn REST send attempts per run |
+| Counters | Separate `cognito`, `phyn_rest`, `total`, and `cap` in the report |
+| Pacing/concurrency | At least 0.25 seconds between send reservations; operations are sequential |
+| REST timeout | 15 seconds per aiohttp request |
+| Cognito timeout | 5 seconds connect and 5 seconds read; SDK retries disabled |
+| Operation/run timeout | 25 seconds per operation; 180 seconds for the run |
+| Redirects/writes | Unexpected REST redirects rejected before follow-up; non-GET REST calls rejected before sending |
+
+Cognito's SDK `before-send` hook and aiohttp's per-send
+`on_request_headers_sent` hook count disjoint transports. The latter also
+covers aiohttp stale-connection retries, unlike a logical request-start hook.
+Attempts reserved before a failed connection/send are **not** a measurement
+of responses received. Authentication normally consumes multiple requests;
+the 24 cap does not mean 24 Phyn reads. The existing runtime's bounded 401/403
+reauthentication remains possible and consumes the same budget.
+There is no additional automatic history or rate-limit retry. A 429 aborts the
+run; it is not retried in violation of `Retry-After`. Wait for the service's
+retry interval before a separately requested retry.
+
+Cancelling an async task cannot terminate an already-running Cognito thread.
+SDK timeouts bound its in-flight I/O, and closing the shared budget prevents
+further sends. This is not a hard OS process-kill deadline. No transport code or
+public runtime API was changed to add these example-only bounds.
+
+Optional `--live-report .artifacts\readonly.json` writes a **new** sanitized
+report, refusing overwrite. Reports distinguish `passed`, `failed`, `empty` and
+`skipped`; no devices means incomplete, not success. Authentication failure is
+counted as failed, and dependent work is skipped. No raw payload, household
+identifier, address, token, password or exception chain is printed or saved.
+Treat aggregate household activity as private too. Do not enable SDK debug logs
+or upload raw pytest tracebacks/captures when investigating a real account.
+
+## History characterization
+
+```powershell
+python -m pytest -m live_readonly --run-live --env-file .env.live --history --history-start 2025-01-01 --live-report .artifacts\history.json -s
+```
+
+`PHYN_DEVICE_ID` (or `--device-id`) is required for history; it must belong to a
+discovered device. The optional start date chooses **one completed seven-day
+UTC interval**. Without it, the interval ends at the latest UTC midnight.
+The operator may choose a small known-active older interval. A future or
+unfinished week is rejected before authentication.
+
+Nine additional read calls compare the same weekly interval, seven consecutive
+daily windows, then that identical weekly interval again. No paging parameters
+are guessed. Reports inspect the known event metadata fields actually returned;
+a list response does not establish whether a service-side limit or hidden
+pagination exists.
+
+Comparison is by event ID and relevant values (open/close timestamps, volume,
+predictions and feedback), with counts rather than raw IDs in the report.
+Events are assigned by start timestamp to half-open `[start,end)` windows.
+Boundary duplicates and events crossing midnight are tracked; full volumes
+belong to the start day, not prorated across days. Out-of-window items are
+reported, not silently double-counted. Identical duplicates within a response
+are deduplicated and counted; conflicting duplicates fail explicitly.
+An ID whose corrected start timestamp assigns it to multiple daily windows
+also fails instead of silently overwriting a value. Per-snapshot gallon totals
+are reported alongside ID-set and changed-value counts.
+All seven daily responses must succeed. A failed/partial read never becomes
+an empty successful window.
+
+The first/last weekly snapshots distinguish possible late-arriving events,
+removed events and changed/corrected values from stable daily/weekly differences.
+These are **observations, not causal proof**: the API does not promise snapshot
+isolation while sequential requests execute. `consistent=false` is a measured
+comparison result, not a failed transport test. Empty history remains explicitly
+empty, and **absence is not proof of retention policy**. Retention and pagination
+remain unknown; physical fixture classification accuracy is not measured.
+The harness neither backfills nor deletes/imports Home Assistant statistics.
+
+### Offline coverage of the harness
+
+`test_usage_diagnostics.py`, `test_history_diagnostics.py` and
+`test_live_guards.py` use new, entirely synthetic fixtures (no private captures).
+They cover the 2+3=5 regression, null/missing predictions, zero versus empty,
+invalid numeric/confidence fields, strict threshold equality, feedback conflicts,
+fixed UTC boundaries, missing/duplicate/changed history, partial failure,
+request caps/pacing, redirects/write prohibition, import safety, opt-in failures
+and redacted reports. Ignore tests use `git check-ignore` for representative
+root/nested private paths and `git ls-files` to catch already tracked secrets
+by path; this is not a content-secret scanner.
+
+The older shared samples below document historical response structures, not a
+fresh live contract proof. The inventory POST envelope follows the historical
+experiment evidence pinned by the remediation work; no live write was attempted
+to re-establish it. The new harness currently has **offline evidence only**.
 
 ### Dependencies
 
@@ -315,8 +449,8 @@ Verifies that top-level imports work correctly.
 | Test | Validates |
 |------|-----------|
 | `test_basic_call` | Correct URL and JSON payload |
-| `test_uses_put_method` | Uses HTTP PUT (not POST) |
-| `test_payload_format` | Payload is `{home_inventory_type_id, count}` |
+| `test_uses_post_method` | Uses the historical POST inventory contract |
+| `test_payload_format` | Payload is `{"list": [{"home_inventory_type_id": ..., "count": ...}]}` |
 | `test_zero_count` | Setting count to 0 works (removing a fixture) |
 | `test_various_fixture_ids` | Multiple fixture type IDs handled correctly |
 

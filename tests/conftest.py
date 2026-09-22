@@ -1,10 +1,149 @@
 """Fixtures and helpers for aiophyn tests."""
+
+import ipaddress
+import socket
+
 import pytest
 from unittest.mock import AsyncMock
 
 from aiophyn.device import Device
 from aiophyn.home import Home
 from aiophyn.home_inventory import HomeInventory
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("local live diagnostics")
+    group.addoption(
+        "--run-live", action="store_true", help="Allow selected live_readonly tests"
+    )
+    group.addoption(
+        "--run-live-writes", action="store_true", help="Unsupported; always errors"
+    )
+    group.addoption(
+        "--env-file", help="Explicit local dotenv file; only with --run-live"
+    )
+    group.addoption("--device-id", help="Device to characterize (or PHYN_DEVICE_ID)")
+    group.addoption(
+        "--history",
+        action="store_true",
+        help="Compare a completed UTC week and seven daily windows",
+    )
+    group.addoption("--history-start", help="Completed UTC week start, YYYY-MM-DD")
+    group.addoption(
+        "--live-report", help="New sanitized JSON report path, preferably .artifacts"
+    )
+
+
+def _loopback(host):
+    if isinstance(host, bytes):
+        host = host.decode("ascii")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def pytest_configure(config):
+    if config.getoption("--run-live-writes"):
+        raise pytest.UsageError(
+            "Live writes are unsupported; --run-live permits read-only checks only"
+        )
+    if not config.getoption("--run-live") and any(
+        config.getoption(option)
+        for option in (
+            "--env-file",
+            "--device-id",
+            "--history",
+            "--history-start",
+            "--live-report",
+        )
+    ):
+        raise pytest.UsageError("Live configuration requires explicit --run-live")
+    if config.getoption("--history-start") and not config.getoption("--history"):
+        raise pytest.UsageError("--history-start requires --history")
+    config._live_network_allowed = False
+    guard = pytest.MonkeyPatch()
+    config._network_guard = guard
+    original_dns = socket.getaddrinfo
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def require_loopback(host):
+        if not config._live_network_allowed and not _loopback(host):
+            raise RuntimeError(
+                "Offline test blocked external network; use mocks or a loopback server"
+            )
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host is not None:
+            require_loopback(host)
+        return original_dns(host, *args, **kwargs)
+
+    def connect(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            require_loopback(address[0])
+        return original_connect(sock, address)
+
+    def connect_ex(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            require_loopback(address[0])
+        return original_connect_ex(sock, address)
+
+    guard.setattr(socket, "getaddrinfo", getaddrinfo)
+    guard.setattr(socket.socket, "connect", connect)
+    guard.setattr(socket.socket, "connect_ex", connect_ex)
+
+
+def pytest_unconfigure(config):
+    if hasattr(config, "_network_guard"):
+        config._network_guard.undo()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    live = [item for item in items if item.get_closest_marker("live_readonly")]
+    if not config.getoption("--run-live"):
+        items[:] = [item for item in items if item not in live]
+        config.hook.pytest_deselected(items=live)
+    elif live:
+        # Credential access is confined to the explicitly selected live fixture.
+        return
+    else:
+        raise pytest.UsageError("--run-live requires selected live_readonly tests")
+
+
+@pytest.fixture
+def live_configuration(request):
+    if not request.config.getoption(
+        "--run-live"
+    ) or not request.node.get_closest_marker("live_readonly"):
+        pytest.fail(
+            "Live configuration requires an explicitly selected live_readonly test",
+            pytrace=False,
+        )
+    from examples.diagnostics import ConfigurationError, load_configuration
+
+    try:
+        config = load_configuration(
+            request.config.getoption("--env-file"),
+            request.config.getoption("--device-id"),
+        )
+        if request.config.getoption("--history") and not config.device_id:
+            raise ConfigurationError("History requires PHYN_DEVICE_ID or --device-id")
+    except (ConfigurationError, OSError):
+        pytest.fail(
+            "Live configuration invalid: set PHYN_USERNAME/PHYN_PASSWORD locally; "
+            "history also needs PHYN_DEVICE_ID. --env-file requires an existing file "
+            "and optional python-dotenv. No authentication attempted.",
+            pytrace=False,
+        )
+    request.config._live_network_allowed = True
+    try:
+        yield config
+    finally:
+        request.config._live_network_allowed = False
 
 
 @pytest.fixture

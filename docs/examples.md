@@ -1,248 +1,117 @@
-# Example Scripts
+# Example scripts
 
-The `examples/` directory contains runnable scripts that exercise the `aiophyn` library against the live Phyn API. These are developer tools for validation, debugging, and exploring API capabilities — not automated tests.
+Examples are **local, explicitly invoked live tools**, not offline tests.
+Importing them does not load credentials, parse arguments, log in or run an event
+loop. No live evidence was gathered while developing the offline harness.
+See [configuration](configuration.md) for local credentials and
+[testing](testing.md#local-opt-in-read-only-checks) for the separately gated pytest
+harness.
 
-> **Important:** All example scripts require real Phyn (or Kohler) credentials. See [configuration.md](configuration.md) for `.env` setup instructions.
+## Read-only diagnostics
 
-## Common Patterns
+Run from the repository root after installing the library. These entry points
+share `examples/diagnostics.py`, use process environment variables by default,
+and load a dotenv file **only** when `--env-file` names it explicitly:
 
-All example scripts share these patterns:
-
-1. **Credential loading** — Reads `PHYN_USERNAME`, `PHYN_PASSWORD`, `PHYN_BRAND`, and optionally `PHYN_DEVICE_ID` from a `.env` file via `python-dotenv`
-2. **Output capture** — Saves all API responses to `examples/output/<script>_<timestamp>.json` for offline analysis
-3. **Error handling** — Catches `PhynError` exceptions and logs them
-4. **Path bootstrapping** — Adds the repository root to `sys.path` so the local `aiophyn` package is importable without installation
-
-## Prerequisites
-
-```bash
-# Install the library and example dependencies
-pip install -e .
-pip install python-dotenv
-
-# Configure credentials
-cp examples/.env.example examples/.env
-# Edit examples/.env with your credentials
+```powershell
+python examples\test_api.py --env-file .env.live
+python examples\test_home_inventory.py --env-file .env.live
+python examples\test_water_usage_events.py --env-file .env.live --days 1,7
+python examples\test_comprehensive.py --env-file .env.live
+python examples\test_alerts.py --env-file .env.live
 ```
 
----
+| Entry point | Reads performed after authentication and discovery |
+|-------------|----------------------------------------------------|
+| `test_api.py` | Selected device state and today's consumption |
+| `test_home_inventory.py` | Fixture catalog and selected device inventory |
+| `test_water_usage_events.py` | Events and predicted fixture usage |
+| `test_comprehensive.py` | Catalog, inventory, events, state, consumption, preferences, firmware and away-mode status |
+| `test_alerts.py` | Selected home's latest alerts and active alert summary |
 
-## test_api.py
+These commands do **not** exercise the full API surface, modify inventory, send
+feedback, mark alerts read, operate valves or run leak tests. They select the
+first discovered device unless `PHYN_DEVICE_ID` or `--device-id` selects another
+discovered device. They no longer iterate over every device automatically.
+Discovery with no devices is reported as incomplete, not a successful device
+check. The legacy `config.py` setup is now used **only by the MQTT example**.
 
-**Purpose:** Quick connectivity and basic API validation. The simplest starting point for verifying your credentials work.
+Every diagnostic prints a sanitized JSON report. Optional
+`--report .artifacts\usage.json` creates a new report and refuses to overwrite an
+existing file. Reports distinguish `passed`, `failed`, `empty` and `skipped`.
+Exit codes: **0** completed reads (including valid empty responses), **1** failed
+or incomplete reads, **2** configuration, argument or report-file errors.
+Authentication failure contributes one failed check; dependent checks are
+skipped. A malformed payload or partial request failure never becomes zero use.
 
-**What it does:**
-1. Authenticates with the Phyn API
-2. Discovers all homes and devices for the user
-3. Gets the device state (sensors, valve status) for the first device found
-4. Gets today's water consumption with detailed hourly breakdown
-5. Reads the current valve status from the device state
+Report output contains structural counts and aggregate usage, not credentials,
+tokens, household/device/event IDs, addresses, free-text feedback or raw
+exceptions. Custom fixture labels are combined into
+`Unpublished custom predictions`. Raw responses are no longer saved
+automatically. Even sanitized aggregates can reveal household activity; keep
+reports local unless deliberately reviewed for sharing. Library/SDK logs are
+suppressed during diagnostics to prevent secret-bearing debug/error output.
 
-**Parameters (from `.env`):**
+## Predicted fixture usage
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PHYN_USERNAME` | Yes | Your Phyn account email |
-| `PHYN_PASSWORD` | Yes | Your Phyn account password |
-| `PHYN_BRAND` | No | `"phyn"` (default) or `"kohler"` |
+This is explicitly an **ML prediction report**, not physical fixture ground
+truth or a feedback-corrected consumption ledger.
 
-**Output:** `examples/output/test_api_<timestamp>.json`
+Each event's full `total_flow` is assigned to the first returned prediction.
+Missing/null prediction results, missing/null/empty suggestions and absent
+fixture names are included in **Unknown**. The total is calculated independently
+from **all** events: 2 gallons predicted as Sink plus 3 unclassified gallons
+means Sink 2, Unknown 3, **total 5**, not 2. Volumes are not multiplied by
+confidence or split among predictions. No events means `empty`; one zero-volume
+event remains a counted event.
 
-Contains captured responses for `get_homes`, `get_state`, `get_consumption`, and `valve_status`.
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--days` | `1,7,30` for usage; `7` otherwise | Up to three unique ranges, each 1-31 days |
+| `--low-confidence-threshold` | `0.70` | Top score strictly below this threshold |
+| `--ambiguity-gap-threshold` | `0.15` | First-minus-second score strictly below this gap |
+| `--max-review-events` | `10` | Accepted legacy option; raw per-event review output was replaced by aggregate counts |
 
-**Commented-out features:** Lines for `close_valve()` and `open_valve()` are included but commented out. Uncomment them to test valve control (use caution — this controls real hardware).
+Thresholds and confidence values must be finite and within 0-1. Flow must be
+finite and nonnegative. Numeric strings are accepted; missing or malformed flow
+or confidence fails explicitly, rather than silently becoming zero. Suggestions
+must be ordered by confidence. Unknown confidence is not a measured zero and
+is reported as null. Missing suggestions generate a review signal.
 
-**How to run:**
-```bash
-cd examples
-python test_api.py
+User feedback presence generates a separate review signal. When both fixture
+IDs are available, a disagreement with the first prediction is counted as a
+**feedback conflict**; it does not override the predicted bucket. Without both
+IDs, disagreement is unknown. Feedback presence does not establish real-world
+classification accuracy.
+
+Algorithm counts retain known algorithm labels; unfamiliar labels are combined
+as `unrecognized` in shareable reports rather than echoing arbitrary API text.
+
+## Bounded history characterization
+
+```powershell
+python examples\test_water_usage_events.py --env-file .env.live --days 7 --history --history-start 2025-01-01 --report .artifacts\history.json
 ```
 
----
+History requires an explicitly selected device. An omitted `--history-start`
+uses the seven UTC days ending at the most recent UTC midnight. A supplied date
+selects a completed seven-day interval, useful for a known-active older period.
+It does not initiate a large historical backfill. Details, comparison limits and
+request limits are in [testing](testing.md#history-characterization).
 
-## test_comprehensive.py
+## MQTT example (separate legacy setup)
 
-**Purpose:** Exercises the full API surface in a single run, producing a pass/fail report for each endpoint.
+`test_mqtt.py` still uses local `examples/config.py`; it does **not** read dotenv
+or share the bounded HTTP diagnostic harness:
 
-**What it does:**
-1. **Authentication** — Verifies login
-2. **Home Discovery** — Lists homes, addresses, and devices
-3. **Device State** — Reads temperature, pressure, and valve status
-4. **Water Consumption** — Today's consumption with details and event count
-5. **Water Usage Events** — Last 7 days of events with fixture prediction metadata
-6. **Fixture Types** — Master catalog of fixture types (Home Inventory)
-7. **Device Inventory** — User-configured fixture counts per device
-8. **Device Preferences** — All device configuration preferences
-9. **Firmware Info** — Current firmware version and upgrade timestamp
-10. **Away Mode** — Away mode status
-
-**Parameters (from `.env`):**
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PHYN_USERNAME` | Yes | Your Phyn account email |
-| `PHYN_PASSWORD` | Yes | Your Phyn account password |
-| `PHYN_BRAND` | No | `"phyn"` (default) or `"kohler"` |
-| `PHYN_DEVICE_ID` | No | Override auto-discovered device ID |
-
-**Output:** `examples/output/test_comprehensive_<timestamp>.json`
-
-Contains all captured API responses plus a `results` summary with pass/fail counts.
-
-**Console output example:**
-```
-======================================================================
-  TEST SUMMARY
-======================================================================
-  Total:  10
-  Passed: 10
-  Failed: 0
-
-  [PASS] Authentication
-  [PASS] get_homes
-  [PASS] get_state
-  ...
+```powershell
+Copy-Item examples\config.example examples\config.py
+# Edit this ignored local Python file, then explicitly run:
+python examples\test_mqtt.py
 ```
 
-**How to run:**
-```bash
-cd examples
-python test_comprehensive.py
-```
-
----
-
-## test_home_inventory.py
-
-**Purpose:** Focused validation of the Home Inventory endpoints — fixture types and per-device fixture configuration.
-
-**What it does:**
-1. **Test 1: Fixture Types** — Retrieves the master catalog of all fixture types Phyn recognizes (Toilet, Sink, Shower, etc.) with their IDs, names, and icon URLs
-2. **Test 2: Device Inventory** — For each discovered device, retrieves the user's configured fixtures with counts (e.g., "5 Toilets, 9 Sinks"), distinguishing configured vs. unconfigured fixtures
-3. **Test 3: Cross-Reference** — Compares the master fixture catalog against each device's inventory to show which types are configured and their counts
-
-**Parameters (from `.env`):**
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PHYN_USERNAME` | Yes | Your Phyn account email |
-| `PHYN_PASSWORD` | Yes | Your Phyn account password |
-| `PHYN_BRAND` | No | `"phyn"` (default) or `"kohler"` |
-| `PHYN_DEVICE_ID` | No | Override auto-discovered device ID |
-
-**Output:** `examples/output/test_home_inventory_<timestamp>.json`
-
-Contains fixture types, per-device inventory, and cross-reference data.
-
-**How to run:**
-```bash
-cd examples
-python test_home_inventory.py
-```
-
----
-
-## test_mqtt.py
-
-**Purpose:** Tests real-time MQTT streaming — subscribes to device update topics and captures live messages.
-
-**What it does:**
-1. Authenticates and discovers devices
-2. Connects to the Phyn MQTT broker over WebSockets
-3. Subscribes to update topics for Phyn Plus devices (`PP1`/`PP2`)
-4. Listens for 10 seconds, logging received messages
-5. Disconnects cleanly and saves captured messages
-
-**Parameters (from `.env`):**
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PHYN_USERNAME` | Yes | Your Phyn account email |
-| `PHYN_PASSWORD` | Yes | Your Phyn account password |
-| `PHYN_BRAND` | No | `"phyn"` (default) or `"kohler"` |
-
-**Output:** `examples/output/test_mqtt_<timestamp>.json`
-
-Contains captured MQTT messages in the `messages` array, plus home/device discovery responses.
-
-**Platform notes:**
-- On Windows, the script sets `WindowsSelectorEventLoopPolicy` to enable `add_reader` support required by the MQTT client
-- If the event loop doesn't support `add_reader` (e.g., some Windows Python builds), the script exits with a descriptive error
-
-**How to run:**
-```bash
-cd examples
-python test_mqtt.py
-```
-
----
-
-## test_water_usage_events.py
-
-**Purpose:** The most advanced example — fetches water usage events and performs ML classification quality analysis on the fixture predictions.
-
-**What it does:**
-1. Authenticates and discovers devices
-2. For each device and each configured time range:
-   - Fetches water usage events via `get_water_usage_events()`
-   - Aggregates usage by fixture type (gallons, event count, average confidence)
-   - Analyzes prediction quality: low-confidence events, ambiguous top-2 classifications, user feedback presence
-   - Reports classification algorithm distribution (clustering, heuristics, user-feedback, etc.)
-   - Lists review candidate events sorted by confidence
-
-**Parameters (from `.env`):**
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PHYN_USERNAME` | Yes | Your Phyn account email |
-| `PHYN_PASSWORD` | Yes | Your Phyn account password |
-| `PHYN_BRAND` | No | `"phyn"` (default) or `"kohler"` |
-| `PHYN_DEVICE_ID` | No | Override auto-discovered device ID |
-
-**CLI arguments:**
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--device-id` | env/auto | Override device ID |
-| `--days` | `1,7,30` | Comma-separated day ranges to analyze |
-| `--low-confidence-threshold` | `0.70` | Flag predictions below this confidence |
-| `--ambiguity-gap-threshold` | `0.15` | Flag when top-2 confidence gap is below this |
-| `--max-review-events` | `10` | Max review candidates to display per range |
-
-**Output:** `examples/output/test_water_usage_events_<timestamp>.json`
-
-Contains all events per device per time range, with full fixture prediction data.
-
-**Console output example:**
-```
-  Usage by fixture (Last 7 days):
-  Fixture                      Gallons   Events   Avg Conf
-  ------------------------- ---------- -------- ----------
-  Shower Only                  105.23g      14      91.2%
-  Toilet                        38.50g      45      82.5%
-  Sink                          12.30g      32      75.8%
-  Dishwasher                     8.10g       3      45.2%
-
-  Classification quality (Last 7 days):
-    Low confidence (<70%): 12/94
-    Ambiguous top-2 (gap < 0.15): 5/94
-    Events with user feedback: 3/94
-```
-
-**How to run:**
-```bash
-cd examples
-python test_water_usage_events.py
-python test_water_usage_events.py --days 1,7 --low-confidence-threshold 0.5
-```
-
----
-
-## Output Directory
-
-All scripts save output to `examples/output/`. This directory is created automatically on first run. Output files are timestamped JSON files containing the raw API responses, making them useful for:
-
-- Offline analysis and debugging
-- Comparing API responses over time
-- Understanding API response structures before writing new code
-- Sharing API data without sharing credentials
+It authenticates, discovers the first home, subscribes to Phyn Plus device
+updates for ten seconds and disconnects. It logs raw home/device/message data
+to the console and does not save a JSON capture. Treat that output as private.
+Its existing event-loop/platform requirements remain unchanged. MQTT streaming
+is not part of the automated live checks or their timeout/request guarantees.

@@ -4,17 +4,27 @@ This document explains how to configure the `aiophyn` library and its example sc
 
 ## Environment Variables
 
-The example scripts in `examples/` use a `.env` file for credentials. A template is provided at `examples/.env.example`.
+The read-only diagnostic scripts in `examples/` read process environment
+variables at runtime. They never search for or automatically load `.env`,
+`.env.live`, `.env.local` or `config.py`. The MQTT example alone retains its
+legacy `examples/config.py` setup; see [examples](examples.md).
 
 ### Setup
 
-```bash
-# Copy the template
-cp examples/.env.example examples/.env
-
-# Edit with your credentials
-# (use any text editor)
+```powershell
+Copy-Item examples\.env.example .env.live
+# Edit .env.live locally; do not paste credentials into a shared transcript.
+# Optional dependency, needed only for an explicitly selected dotenv file:
+python -m pip install python-dotenv
+python examples\test_water_usage_events.py --env-file .env.live
 ```
+
+Without `--env-file`, only `PHYN_*` process variables are used and python-dotenv
+is not needed. With it, the named file must exist. Process variables take
+precedence over file values. Dotenv interpolation is disabled, so secrets are
+not expanded from unrelated environment variables. Missing credentials,
+placeholder credentials or a missing optional dependency produce a nonzero
+exit with local configuration guidance, never a successful no-op.
 
 ### Variables
 
@@ -22,46 +32,47 @@ cp examples/.env.example examples/.env
 |----------|----------|---------|-------------|
 | `PHYN_USERNAME` | Yes | — | Your Phyn or Kohler account email address |
 | `PHYN_PASSWORD` | Yes | — | Your Phyn or Kohler account password |
-| `PHYN_BRAND` | No | `"phyn"` | Brand: `"phyn"` for Phyn devices, `"kohler"` for Kohler H2Wise+ |
-| `PHYN_DEVICE_ID` | No | auto-discovered | Specific device ID to target (skips auto-discovery) |
+| `PHYN_BRAND` | No | `"phyn"` | Deprecated compatibility argument; ignored by the current runtime |
+| `PHYN_DEVICE_ID` | For history | first discovered device | Select one discovered device; required for history characterization |
 
 ### .env.example Contents
 
 ```dotenv
 # Phyn API Test Configuration
 #
-# Copy this file to .env and fill in your credentials.
-# The .env file is excluded from version control via .gitignore.
+# Copy to a local .env.live and select it explicitly with --env-file.
 #
 # Required:
 PHYN_USERNAME=your_email@example.com
 PHYN_PASSWORD=your_password_here
 PHYN_BRAND=phyn
 
-# Optional: Set a specific device ID to skip auto-discovery
+# Select a discovered device; mandatory for history characterization.
 # PHYN_DEVICE_ID=YOUR_DEVICE_ID_HERE
 ```
 
-> **Security:** The `.env` file should never be committed to version control. Ensure it is listed in `.gitignore`.
+> **Security:** Credentials stay local; no GitHub account secrets are needed.
+> `.env`, `*.env`, `.env.*`, `examples/config.py`, `.artifacts/`, local virtual
+> environments and coverage/JUnit outputs are ignored. `examples/.env.example`
+> is a tracked placeholder only. Ignore rules cannot protect an already tracked
+> file: check both `git check-ignore` and `git ls-files` before sharing changes.
+> Never commit raw captures, reports, passwords or tokens. Do not delete
+> unrelated private files while cleaning up.
+
+Ordinary `python -m pytest` and CI's `python -m pytest tests` stay offline even
+when credentials are present. A file is read by live pytest fixtures only after
+both `--run-live` and a selected `live_readonly` test. Merely approving or
+installing this harness is not permission to access a household account.
 
 ---
 
 ## Brand Configuration
 
-The library supports two brands that use the same Phyn hardware platform:
-
-### Phyn (`phyn_brand="phyn"`)
-
-- Direct authentication via AWS Cognito SRP
-- Default API keys and Cognito pool settings are built into the library
-- This is the default brand if not specified
-
-### Kohler H2Wise+ (`phyn_brand="kohler"`)
-
-- Authentication goes through Kohler's Azure AD B2C identity provider first
-- The Kohler token is exchanged for Phyn credentials
-- Requires the `pycryptodome` package for AES decryption of the password token
-- Uses Kohler-specific API keys and Cognito settings retrieved at runtime
+The current runtime authenticates via AWS Cognito SRP. `phyn_brand` is accepted
+for compatibility but ignored. Historical Kohler Azure AD B2C behavior is not
+implemented by this current authentication path; setting `PHYN_BRAND=kohler`
+does not activate an alternate login flow. These examples do not change that
+contract.
 
 ---
 
@@ -77,7 +88,7 @@ async with ClientSession() as session:
     api = await async_get_api(
         username="user@example.com",
         password="your_password",
-        phyn_brand="phyn",         # or "kohler"
+        phyn_brand="phyn",         # deprecated, ignored
         session=session,           # optional: reuse an aiohttp session
         client_id="my-client",     # optional: MQTT client ID
         verify_ssl=True,           # optional: disable SSL verification
@@ -92,7 +103,7 @@ async with ClientSession() as session:
 |-----------|------|---------|-------------|
 | `username` | `str` | — | Phyn/Kohler account email |
 | `password` | `str` | — | Phyn/Kohler account password |
-| `phyn_brand` | `str` | `"phyn"` | `"phyn"` or `"kohler"` |
+| `phyn_brand` | `str` | `"phyn"` | Deprecated; ignored |
 | `session` | `ClientSession` | `None` | Reuse an existing aiohttp session |
 | `client_id` | `str` | `None` | MQTT client identifier (auto-generated if not set) |
 | `verify_ssl` | `bool` | `True` | Whether to verify SSL certificates |
@@ -125,8 +136,8 @@ Both REST API calls and MQTT WebSocket connections respect the proxy settings.
 |---------|---------|---------|
 | `aiohttp` | `^3.8.1` | Async HTTP client for REST API calls |
 | `boto3` | `^1.20.24` | AWS SDK for Cognito authentication |
-| `pycognito` | `^2022.8.0` | AWS Cognito SRP authentication helper |
-| `paho-mqtt` | `>=1.6.1,<3.0.0` | MQTT client for real-time streaming |
+| `pycognito` | `^2024.5.1` | AWS Cognito SRP authentication helper |
+| `paho-mqtt` | `>=2.0.0,<3.0.0` | MQTT client for real-time streaming |
 | `pysocks` | `>=1.7.1,<2.0.0` | SOCKS proxy support for MQTT connections |
 | `pycryptodome` | `>=3.20.0,<4.0.0` | AES decryption for Kohler password tokens |
 
@@ -134,7 +145,7 @@ Both REST API calls and MQTT WebSocket connections respect the proxy settings.
 
 | Package | Purpose |
 |---------|---------|
-| `python-dotenv` | Load `.env` files for credentials |
+| `python-dotenv` | Optional; load only an explicitly selected `--env-file` |
 
 ### Test Dependencies
 

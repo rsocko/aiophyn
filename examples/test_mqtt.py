@@ -1,7 +1,7 @@
 """Run an example script to quickly test MQTT.
 
 Usage:
-    1. Copy .env.example to .env and fill in your credentials
+    1. Copy config.example to config.py and fill in your credentials
     2. Run: python test_mqtt.py
 """
 import asyncio
@@ -11,19 +11,19 @@ import logging
 from aiophyn import async_get_api
 from aiophyn.errors import PhynError
 
-try:
-    from config import USERNAME, PASSWORD, BRAND, PROXY, PROXY_PORT
-except ImportError:
-    raise SystemExit("Copy examples/config.example to examples/config.py and fill in your credentials.")
-
 _LOGGER = logging.getLogger()
 
 async def on_message(device_id, data):
     """Display a received MQTT message"""
     _LOGGER.info("Message for %s: %s", device_id, data)
 
-async def main() -> None:
+async def main() -> int:
     """Create the aiohttp session and run the example."""
+    try:
+        from config import USERNAME, PASSWORD, BRAND, PROXY, PROXY_PORT
+    except ImportError:
+        print("Copy examples/config.example to examples/config.py and fill in your credentials.")
+        return 2
     logging.basicConfig(level=logging.INFO)
     try:
         api = await async_get_api(
@@ -55,8 +55,11 @@ async def main() -> None:
 
         await api.mqtt.disconnect_and_wait()
 
-    except PhynError as err:
-        _LOGGER.error("There was an error: %s", err)
+    except PhynError:
+        _LOGGER.error("MQTT example failed; check local configuration and connectivity.")
+        return 1
+    return 0
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))
