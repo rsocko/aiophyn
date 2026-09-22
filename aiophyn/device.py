@@ -1,4 +1,6 @@
 """Define /devices endpoints."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Awaitable, Any, Callable, Optional, Union
 

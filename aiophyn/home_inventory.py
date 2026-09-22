@@ -88,13 +88,15 @@ class HomeInventory:
         :rtype: dict
 
         .. note::
-            This updates a single fixture type count at a time. The payload
-            format is a simple object with home_inventory_type_id and count.
+            This sends one fixture type count using POST with a ``list`` wrapper,
+            as recorded in the 2026-02-24 endpoint experiment linked in
+            ``docs/architecture.md``. It is not a fresh live validation.
         """
         data = {
-            "home_inventory_type_id": fixture_type_id,
-            "count": count,
+            "list": [
+                {"home_inventory_type_id": fixture_type_id, "count": count}
+            ]
         }
         return await self._request(
-            "put", f"{API_BASE}/home-inventory/device/{device_id}", json=data
+            "post", f"{API_BASE}/home-inventory/device/{device_id}", json=data
         )

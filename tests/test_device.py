@@ -6,7 +6,10 @@ Validates that:
   - Datetime-to-millisecond conversion works correctly
   - Parameters are passed properly
   - Response data is returned as-is
-  - Mock data accurately reflects real Phyn API response structures
+  - Sample response structures remain usable by callers
+
+Sample-shape assertions are not evidence of current server behavior.
+See test_transport_contracts.py for independent offline wire contracts.
 """
 import pytest
 from datetime import datetime, timezone
@@ -657,6 +660,10 @@ class TestDevicePreferences:
 
 class TestAutoShutoff:
     """Tests for auto shutoff operations."""
+
+    def test_annotations_are_postponed_for_python39(self):
+        """Do not evaluate the inherited int | None annotation at import time."""
+        assert Device.set_autoshutoff_enabled.__annotations__["time"] == "int | None"
 
     @pytest.mark.asyncio
     async def test_get_autoshuftoff_status(self, device, mock_request):

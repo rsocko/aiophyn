@@ -4,6 +4,9 @@ Tests the new home inventory endpoints:
   - get_fixture_types() - master list
   - get_device_inventory() - per-device fixtures
   - update_device_inventory() - update fixture counts
+
+Sample-shape assertions below describe local fixtures, not server proof.
+See test_transport_contracts.py for independent offline wire contracts.
 """
 import pytest
 from unittest.mock import AsyncMock
@@ -203,30 +206,30 @@ class TestUpdateDeviceInventory:
         await home_inventory.update_device_inventory("DEVICE123", 8, 4)
 
         mock_request.assert_called_once_with(
-            "put",
+            "post",
             f"{API_BASE}/home-inventory/device/DEVICE123",
-            json={"home_inventory_type_id": 8, "count": 4},
+            json={"list": [{"home_inventory_type_id": 8, "count": 4}]},
         )
 
     @pytest.mark.asyncio
-    async def test_uses_put_method(self, home_inventory, mock_request):
-        """Verify that PUT HTTP method is used."""
+    async def test_uses_post_method(self, home_inventory, mock_request):
+        """Preserve the POST method from the historical endpoint experiment."""
         mock_request.return_value = {}
         await home_inventory.update_device_inventory("DEVICE123", 8, 3)
 
         args = mock_request.call_args[0]
-        assert args[0] == "put"
+        assert args[0] == "post"
 
     @pytest.mark.asyncio
     async def test_payload_format(self, home_inventory, mock_request):
-        """Verify payload is a simple object with type_id and count."""
+        """Verify payload wraps type_id and count in a list."""
         mock_request.return_value = {}
         await home_inventory.update_device_inventory("DEVICE123", 5, 2)
 
         call_kwargs = mock_request.call_args.kwargs
         json_data = call_kwargs["json"]
 
-        assert json_data == {"home_inventory_type_id": 5, "count": 2}
+        assert json_data == {"list": [{"home_inventory_type_id": 5, "count": 2}]}
 
     @pytest.mark.asyncio
     async def test_zero_count(self, home_inventory, mock_request):
@@ -235,7 +238,7 @@ class TestUpdateDeviceInventory:
         await home_inventory.update_device_inventory("DEVICE123", 1, 0)
 
         call_kwargs = mock_request.call_args.kwargs
-        assert call_kwargs["json"]["count"] == 0
+        assert call_kwargs["json"]["list"][0]["count"] == 0
 
     @pytest.mark.asyncio
     async def test_various_fixture_ids(self, home_inventory, mock_request):
@@ -253,5 +256,5 @@ class TestUpdateDeviceInventory:
         for type_id, count, _name in test_cases:
             await home_inventory.update_device_inventory("DEVICE123", type_id, count)
             call_kwargs = mock_request.call_args.kwargs
-            assert call_kwargs["json"]["home_inventory_type_id"] == type_id
-            assert call_kwargs["json"]["count"] == count
+            assert call_kwargs["json"]["list"][0]["home_inventory_type_id"] == type_id
+            assert call_kwargs["json"]["list"][0]["count"] == count

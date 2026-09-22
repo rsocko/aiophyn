@@ -3,6 +3,7 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from json import JSONDecodeError
 from typing import Optional
 
 import boto3
@@ -150,7 +151,7 @@ class API:
             if err.status in (401, 403):
                 raise AuthenticationError(f"Unauthorized requesting {url}") from err
             raise RequestError(f"There was an error while requesting {url}") from err
-        except ClientError as err:
+        except (ClientError, asyncio.TimeoutError, JSONDecodeError) as err:
             raise RequestError(f"There was an error while requesting {url}") from err
         finally:
             if not use_running_session:

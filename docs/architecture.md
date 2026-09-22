@@ -55,10 +55,18 @@ The central class that manages authentication and holds references to all subsys
 
 **Authentication flow:**
 
-1. For **Phyn** brand: Direct AWS Cognito SRP authentication
-2. For **Kohler** brand: B2C login → Kohler token → Phyn token exchange → Cognito authentication
+Authentication uses AWS Cognito refresh-token auth when available, falling back
+to SRP login. The legacy `phyn_brand` argument is accepted but ignored; there is
+no separate Kohler authentication flow.
 
-The private `_request()` method handles all HTTP calls, automatically refreshing expired tokens before making requests.
+The private `_request()` method handles all HTTP calls, refreshing expired tokens
+before requests. A 401 or 403 triggers at most one reauthentication and replay
+with the same method, body, and token type; another 401/403 raises
+`AuthenticationError`. Other HTTP failures (including 429 and 5xx), aiohttp
+client errors, timeouts, and malformed JSON raise `RequestError` with the original
+exception as the cause. There is no general retry of failed writes.
+Cancellation propagates unchanged. Caller-provided open sessions remain open;
+sessions created by `_request()` are closed on both success and failure.
 
 ---
 
@@ -85,7 +93,7 @@ Handles all device-level operations — the largest class in the library.
 | `get_state(device_id)` | Current device state (sensors, valve, online status) | `dict` |
 | `get_consumption(device_id, duration, ...)` | Water consumption for a day/month/year | `dict` |
 | `get_water_statistics(device_id, from_ts, to_ts)` | Daily statistics (flow, pressure, temperature) | `list[dict]` |
-| `get_water_usage_events(device_id, from_dt, to_dt)` | Individual water usage events with ML fixture predictions | `list[dict]` |
+| `get_water_usage_events(device_id, from_datetime, to_datetime, *, from_ts, to_ts)` | Individual water usage events with ML fixture predictions; each bound may use a datetime or integer millisecond epoch, or its upstream `*_ts` keyword | `list[dict]` |
 | `submit_water_usage_event_feedback(event_id, fixture_id, ...)` | Submit fixture correction feedback | `dict` |
 | `open_valve(device_id)` | Open the shutoff valve | `dict` |
 | `close_valve(device_id)` | Close the shutoff valve | `dict` |
@@ -102,6 +110,18 @@ Handles all device-level operations — the largest class in the library.
 
 > **Note:** `get_autoshuftoff_status` preserves upstream's public method name, including its spelling.
 
+Usage events use `GET /water-usage-events` with `device_id`, `from_ts`, and
+`to_ts` query parameters and an access token. Integer milliseconds pass through
+unchanged; datetime bounds use `int(value.timestamp() * 1000)` and therefore
+respect aware UTC offsets (naive datetimes retain Python's local-time behavior).
+Missing, duplicate, or invalid-type bounds raise `TypeError` before any request;
+booleans are not accepted as timestamps. Range ordering and timestamp magnitude
+are not additionally validated.
+
+Feedback uses `POST /water-usage-events/{event_id}/feedback/` with an **ID token**
+and JSON `{"fixture_id": 8, "sub_fixture_id": null, "tell_us": null}`. Optional
+values replace the nulls when supplied; the fields are not omitted.
+
 ---
 
 ### `HomeInventory` — [aiophyn/home_inventory.py](../aiophyn/home_inventory.py)
@@ -115,6 +135,35 @@ Handles fixture type catalog and per-device fixture inventory management.
 | `get_fixture_types()` | Master catalog of all fixture types (Toilet, Sink, etc.) | `list[dict]` |
 | `get_device_inventory(device_id)` | User-configured fixtures for a device (with counts) | `dict` with `list` key |
 | `update_device_inventory(device_id, fixture_type_id, count)` | Update fixture count for a device | `dict` |
+
+### Endpoint contracts and evidence
+
+Inventory reads use `GET /home-inventory/types` and
+`GET /home-inventory/device/{device_id}`, respectively. The update uses
+`POST /home-inventory/device/{device_id}` with an access token and this envelope:
+
+```json
+{"list": [{"home_inventory_type_id": 8, "count": 4}]}
+```
+
+The source is the **historical 2026-02-24 experiment** in
+[the endpoint research notes](https://github.com/rsocko/ideation/blob/77916cd7c0367e7112d56bdb0942f6c16d0ed039/experiments/home-automation/phyn-api-exploration/docs/api-endpoints.md),
+which records HTTP 200 with `{"code": "success", "message": "success"}` for that
+POST envelope, HTTP 403 for PUT, and HTTP 400 `PWS_ERROR_400_HI_3001` for bare
+objects/arrays. The notes cite `scripts/home_inventory_put_test.py --probe-formats`;
+probe scripts support the experiment, but raw response captures are not committed.
+This is documentation-based provenance, **not a fresh live validation**.
+No Phyn requests or mutations are performed by the offline contract suite.
+
+`tests/test_transport_contracts.py` sends public-method calls through the real
+`API._request` to a loopback aiohttp server. It checks serialized methods, paths,
+queries, JSON, token headers, decoding, bounded reauthentication, error causes,
+session ownership, and cancellation. Inventory write expectations derive from
+the cited experiment; event/feedback signatures preserve the inherited upstream
+contract. Responses and error scenarios are independent synthetic cases.
+Fixture list/dict shape checks in the unit suite are only local model checks,
+not proof of server behavior. No new validation policy for negative fixture IDs,
+counts, naive datetimes, or reversed ranges is inferred from these fixtures.
 
 ---
 
@@ -159,8 +208,9 @@ Defined in [aiophyn/errors.py](../aiophyn/errors.py):
 ```
 Exception
 ├── PhynError          # Base error for all Phyn-related errors
-│   └── RequestError   # HTTP request failures
-└── BrandError         # Invalid brand specified during initialization
+│   ├── RequestError          # HTTP, timeout, and JSON decoding failures
+│   └── AuthenticationError   # Authentication failed or retry exhausted
+└── BrandError                # Legacy exported error; brand argument is ignored
 ```
 
 ---
