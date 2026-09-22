@@ -57,7 +57,8 @@ Home Assistant 2026.9.3 through `hass-nabucasa`; its declared Python minimum is
 
 `.github/workflows/smoke-test.yml` runs the offline unit/contract suite and
 packaging checks on Python 3.9, 3.12, and 3.14. It triggers on all pull requests,
-manual dispatch, and pushes to `main`, `feature/**`, `work/**`, and `rsocko-*`.
+manual dispatch, and pushes to `main`, `feature/**`, `work/**`, `validation/**`,
+and `rsocko-*`.
 The tests use mocks or a loopback HTTP server, never Phyn credentials or devices.
 Dependency installation requires access to the package index; test/probe
 execution does not contact Phyn.
@@ -82,8 +83,9 @@ run `pip check`, and execute the copied probe using Python isolated mode (`-I`).
 The probe verifies that imports come from that environment's installed
 distribution, not the checkout, and compares installed metadata and module
 versions. It imports supported API/dependency modules and invokes real catalog,
-inventory, usage-event, and legacy `get_autoshuftoff_status` methods through an
-injected mock transport, asserting request routing and timestamp parameters.
+inventory read/update, usage-event, feedback, and legacy `get_autoshuftoff_status`
+methods through an injected mock transport, asserting request routing, timestamp
+parameters, the POST inventory envelope, and feedback ID-token selection.
 It does not authenticate, create an MQTT connection, or access a real device.
 
 The release workflow uses the same helper and offline tests before uploading

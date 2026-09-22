@@ -85,8 +85,8 @@ Detailed documentation is available in the [`docs/`](docs/) directory:
 ## CI Tests and Packaging
 
 `.github/workflows/smoke-test.yml` runs on all pull requests and pushes to
-`main`, `feature/**` (including `feature/fixture-usage`), `work/**`, and
-`rsocko-*`. Python 3.9, 3.12, and 3.14 each run the offline unit/contract suite
+`main`, `feature/**` (including `feature/fixture-usage`), `work/**`,
+`validation/**`, and `rsocko-*`. Python 3.9, 3.12, and 3.14 each run the offline unit/contract suite
 against the Poetry editable install, then verify wheel and sdist installations
 in clean environments outside the checkout. No Phyn credentials are required.
 

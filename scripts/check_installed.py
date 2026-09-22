@@ -32,12 +32,29 @@ async def check_features():
     )
 
     request.reset_mock()
+    await inventory.update_device_inventory("offline-device", 8, 4)
+    request.assert_awaited_once_with(
+        "post",
+        f"{API_BASE}/home-inventory/device/offline-device",
+        json={"list": [{"home_inventory_type_id": 8, "count": 4}]},
+    )
+
+    request.reset_mock()
     device = Device(request)
     await device.get_water_usage_events("offline-device", from_ts=1000, to_ts=2000)
     request.assert_awaited_once_with(
         "get",
         f"{API_BASE}/water-usage-events",
         params={"device_id": "offline-device", "from_ts": 1000, "to_ts": 2000},
+    )
+
+    request.reset_mock()
+    await device.submit_water_usage_event_feedback("offline-event", 8)
+    request.assert_awaited_once_with(
+        "post",
+        f"{API_BASE}/water-usage-events/offline-event/feedback/",
+        token_type="id",
+        json={"fixture_id": 8, "sub_fixture_id": None, "tell_us": None},
     )
 
     request.reset_mock()

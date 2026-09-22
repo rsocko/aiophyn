@@ -4,6 +4,14 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Correct inventory updates to POST with a `list` envelope based on the recorded
+  endpoint experiment; add offline HTTP and authentication contracts.
+- Wrap request timeouts and malformed JSON in `RequestError`, preserving causes
+  and cancellation behavior.
+- Support the Home Assistant 2026.9.3 authentication dependency with
+  `pycognito>=2024.5.1,<2025.0.0` and retain Python 3.9 import compatibility.
+- Run offline tests and isolated distribution checks in CI, including validation
+  branches, and refresh the dependency lock for supported runtimes.
 - Restore upstream's `get_autoshuftoff_status` method name, undoing the unrelated
   feature-branch rename.
 - Merge upstream `main` through `cb2e32f` (2026.9.1), retaining its MQTT
