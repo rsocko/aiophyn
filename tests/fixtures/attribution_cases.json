@@ -100,6 +100,25 @@
     "expected": {"attributed_fixture": "Toilet", "attributed_fixture_id": 8, "tied_confidence": true, "needs_review": true}
   },
   {
+    "name": "scored-model-without-name-or-id-cannot-attribute-category",
+    "event": {
+      "total_flow": 2,
+      "latest_suggested_fixtures_result": {"suggested_fixtures": [{"confidence_score": 0.8}]}
+    },
+    "expected": {"attributed_fixture": "Unknown", "attributed_fixture_id": null, "attribution_source": "unknown", "attributed_confidence": null, "top_confidence": 0.8, "review_reasons": ["no_attributable_prediction"]}
+  },
+  {
+    "name": "model-winner-can-use-unambiguous-same-id-name",
+    "event": {
+      "total_flow": 2,
+      "latest_suggested_fixtures_result": {"suggested_fixtures": [
+        {"fixture_id": 7, "confidence_score": 0.9},
+        {"fixture_id": 7, "fixture_name": "Sink", "confidence_score": 0.2}
+      ]}
+    },
+    "expected": {"attributed_fixture": "Sink", "attributed_fixture_id": 7, "attribution_source": "prediction", "attributed_confidence": 0.9, "review_reasons": []}
+  },
+  {
     "name": "neither-source-is-unknown",
     "event": {"total_flow": 2, "latest_user_feedback": null, "latest_suggested_fixtures_result": {"suggested_fixtures": []}},
     "expected": {"attributed_fixture": "Unknown", "attributed_fixture_id": null, "attribution_source": "unknown", "attributed_confidence": null, "needs_review": true}
