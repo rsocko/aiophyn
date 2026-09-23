@@ -4,6 +4,13 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+## [2026.9.2.dev1] - Fork development prerelease
+
+- Package the validated fixture-usage branch as a uniquely versioned wheel and
+  sdist for a controlled Home Assistant test installation. No runtime behavior
+  changes relative to `42d35d6`; no upstream PyPI publication.
+- Restrict PyPI publishing to non-prerelease releases in the upstream repository;
+  fork development artifacts are published through GitHub Releases only.
 - Attribute example usage to explicit user-selected categories before models;
   otherwise select the highest-confidence candidate, independently of returned
   order. Preserve raw events and full volume, distinguish attribution sources,

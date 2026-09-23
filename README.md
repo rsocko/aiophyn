@@ -61,13 +61,30 @@ for a reproducible installation):
 pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture-usage"
 ```
 
-The validated remediation is included in `feature/fixture-usage`, which was
-fast-forwarded to `972f16c8fb0ede1a2f3365680a972f70c47b6fe7`.
+The validated remediation is included in `feature/fixture-usage`. The initial
+checkpoint was `972f16c8fb0ede1a2f3365680a972f70c47b6fe7`; the subsequent
+`42d35d61e338da4b34b5074490782a80419a31cd` checkpoint includes user-first
+attribution diagnostics, multi-device coverage, and development-tool mitigations.
 The temporary validation branch was removed after promotion; the tested
 checkpoint remains reachable through the feature branch. It includes the corrected Home
 Assistant authentication dependency and diagnostic harness. Use a reviewed
 immutable commit for paired testing. These changes have not been promoted to
-`main` or published, and the package version still matches upstream's `2026.9.1`.
+`main` or published to PyPI.
+
+### Fork development prerelease
+
+The fork development version is **`2026.9.2.dev1`**, based on the validated
+`42d35d6` runtime with no behavior changes. Its wheel and source distribution
+are intended for the GitHub prerelease
+[`v2026.9.2.dev1`](https://github.com/rsocko/aiophyn/releases/tag/v2026.9.2.dev1),
+not upstream PyPI. Release assets include `SHA256SUMS`; verify the selected
+artifact against that file. Consumers should pin the exact asset URL and hash,
+not a moving branch or the older `2026.9.1` version string.
+
+For Home Assistant, use the matching integration prerelease and its pinned
+library requirement. Installing the library alone does not update an installed
+HACS integration or persist a package override across container recreation.
+Treat this as a test-instance candidate, not a production release.
 
 For development, use Poetry 2.2.1 and the checked-in dependency lock:
 

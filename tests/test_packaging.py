@@ -16,6 +16,17 @@ def test_checkout_versions_match():
     assert verification.source_version()
 
 
+def test_pypi_publish_job_excludes_forks_and_prereleases():
+    workflow = (
+        verification.ROOT / ".github" / "workflows" / "publish-to-pypi.yml"
+    ).read_text(encoding="utf-8")
+    job = workflow.split("  build_and_publish:\n", 1)[1].split("    steps:", 1)[0]
+    assert (
+        "    if: ${{ github.repository == 'jordanruthe/aiophyn' "
+        "&& !github.event.release.prerelease }}"
+    ) in job.splitlines()
+
+
 @pytest.mark.parametrize(
     "module_version",
     ['__version__ = "1.2.3"', '__version__ = "1.2.4"', "pass"],

@@ -302,9 +302,20 @@ methods through an injected mock transport, asserting request routing, timestamp
 parameters, the POST inventory envelope, and feedback ID-token selection.
 It does not authenticate, create an MQTT connection, or access a real device.
 
-The release workflow uses the same helper and offline tests before uploading
-the verified artifacts. Running the helper itself never publishes anything.
-Version selection and publication remain separate release decisions.
+The PyPI release workflow uses the same helper and offline tests before
+uploading verified artifacts, but its publish job is restricted to stable
+releases in `jordanruthe/aiophyn`. Fork releases and prereleases cannot run that
+job. The gate must be present in the tagged source before a GitHub release is
+published; GitHub's `release: published` event also includes prereleases.
+
+The fork's `2026.9.2.dev1` candidate uses a uniquely versioned GitHub prerelease,
+not PyPI. Publish only the verified wheel, sdist, and a `SHA256SUMS` file after
+the exact commit passes the Python matrix. Use an unused tag and asset names;
+never replace an existing release artifact. Enable release immutability when
+available, and require consumers to pin the wheel URL plus SHA256 regardless.
+Verify downloaded public assets against the locally validated bytes.
+Running the build helper itself never publishes anything. Publication, a
+Home Assistant installation, and live device actions remain separate decisions.
 
 ---
 

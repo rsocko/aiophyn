@@ -10,6 +10,7 @@ permissions:
 jobs:
   build_and_publish:
     name: Build and publish Python distribution to PyPI
+    if: ${{ github.repository == 'jordanruthe/aiophyn' && !github.event.release.prerelease }}
     runs-on: ubuntu-latest
 
     steps:
