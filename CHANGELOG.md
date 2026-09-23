@@ -4,6 +4,11 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Add offline multi-device routing, explicit-selection, and usage/history
+  isolation regressions without changing default device selection.
+- Remove the unused vulnerable Black development dependency and mitigate pytest
+  temporary-directory risks with private per-run roots, retaining Python 3.9.
+  This does not remediate inherited dependency advisories.
 - Include unclassified volume in example usage totals and tolerate missing/null
   predictions; label attribution as predicted, with separate feedback conflicts.
 - Make diagnostic examples import-safe, with explicit local configuration,

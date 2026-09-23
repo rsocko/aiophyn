@@ -2,6 +2,7 @@
 
 import ipaddress
 import socket
+import tempfile
 
 import pytest
 from unittest.mock import AsyncMock
@@ -45,7 +46,20 @@ def _loopback(host):
         return False
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_configure(config):
+    if config.option.basetemp is not None:
+        raise pytest.UsageError(
+            "--basetemp is disabled: tests use a private per-run temporary directory"
+        )
+    # Keep pytest 8's predictable child paths inside an atomically created,
+    # owner-only directory (CVE-2025-71176 mitigation).
+    private_temp = tempfile.TemporaryDirectory(prefix="aiophyn-pytest-")
+    config.add_cleanup(private_temp.cleanup)
+    temp_environment = pytest.MonkeyPatch()
+    config.add_cleanup(temp_environment.undo)
+    temp_environment.setenv("PYTEST_DEBUG_TEMPROOT", private_temp.name)
+
     if config.getoption("--run-live-writes"):
         raise pytest.UsageError(
             "Live writes are unsupported; --run-live permits read-only checks only"

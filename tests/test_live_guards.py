@@ -68,6 +68,62 @@ raise SystemExit(pytest.main(["tests/test_home.py", "tests/test_live_readonly.py
     assert "1 deselected" in result.stdout
 
 
+def test_pytest_temp_paths_are_inside_private_per_run_root(tmp_path):
+    root = Path(os.environ["PYTEST_DEBUG_TEMPROOT"])
+    assert root.name.startswith("aiophyn-pytest-")
+    assert not root.is_symlink()
+    assert root.resolve() in tmp_path.resolve().parents
+    if os.name == "posix":
+        assert root.stat().st_mode & 0o777 == 0o700
+        assert root.stat().st_uid == os.getuid()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_pytest_temp_root_is_unique_cleaned_and_environment_restored(fail):
+    code = """
+import os
+from pathlib import Path
+import pytest
+
+original = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+roots = []
+
+class Probe:
+    @pytest.hookimpl(trylast=True)
+    def pytest_sessionstart(self, session):
+        root = Path(os.environ["PYTEST_DEBUG_TEMPROOT"])
+        assert str(root) != original
+        assert root.is_dir()
+        roots.append(root)
+        if FAIL:
+            raise pytest.UsageError("synthetic configuration failure")
+
+for _ in range(2):
+    status = pytest.main(["tests/test_home.py", "-q"], plugins=[Probe()])
+    assert status == (4 if FAIL else 0)
+    assert os.environ.get("PYTEST_DEBUG_TEMPROOT") == original
+    assert not roots[-1].exists()
+assert roots[0] != roots[1]
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code.replace("FAIL", repr(fail))],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_explicit_basetemp_cannot_bypass_private_root(tmp_path):
+    marker = tmp_path / "preserved.txt"
+    marker.write_text("preserve caller files", encoding="utf-8")
+    result = run_pytest("tests/test_home.py", "--basetemp", str(tmp_path), "-q")
+    assert result.returncode != 0
+    assert "--basetemp is disabled" in result.stdout + result.stderr
+    assert marker.read_text(encoding="utf-8") == "preserve caller files"
+
+
 @pytest.mark.parametrize(
     "script",
     [

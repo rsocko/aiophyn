@@ -41,6 +41,21 @@ not an operating-system sandbox: independently launched subprocesses or other
 transport implementations need their own protection. Child pytest invocations
 load the same guard.
 
+### Private pytest temporary directories
+
+The suite retains pytest 8 for Python 3.9 support. To mitigate
+[CVE-2025-71176](https://github.com/advisories/GHSA-6w46-j5rx-g56g), initial test
+configuration creates a fresh private directory with Python's
+`TemporaryDirectory` (mode 0700 on Unix) and directs pytest's predictable
+temporary paths inside it through `PYTEST_DEBUG_TEMPROOT`. This applies to
+ordinary commands, child pytest invocations, and both CI workflows.
+Caller-supplied `--basetemp` is rejected rather than bypassing this protection.
+The directory is cleaned and the previous environment restored at shutdown,
+including configuration failures; pytest's usual cross-run temporary-file
+retention is intentionally disabled. Explicitly saved reports are unaffected.
+This mitigates this suite's usage; it does not patch pytest globally or make
+the inherited dependency inventory vulnerability-free.
+
 ## Local opt-in read-only checks
 
 ```powershell
@@ -195,8 +210,13 @@ checks. Tests use `pytest-asyncio` for testing `async` methods.
 The original lock dated back to 2022 and omitted runtime dependencies already
 declared in the manifest. It was migrated with Poetry 2.2.1, retaining unrelated
 pins. Python 3.14 requires newer native-extension packages (`aiohttp`,
-`frozenlist`, `multidict`, `yarl`, and `cffi`) and a newer Black formatter.
+`frozenlist`, `multidict`, `yarl`, and `cffi`).
 Their required transitive changes and the new development tools are locked too.
+The unused Black development dependency was subsequently removed to eliminate
+the feature-introduced vulnerable formatter version
+([CVE-2026-32274](https://github.com/advisories/GHSA-3936-cmfr-pm3m)).
+Only its now-unreachable dependencies were pruned; retained package versions
+and artifact hashes were unchanged. Formatting is not a required CI step.
 `pycognito` now requires `>=2024.5.1,<2025.0.0`, matching the version required by
 Home Assistant 2026.9.3 through `hass-nabucasa`; its declared Python minimum is
 3.8, so aiophyn retains 3.9. The lock is not a dependency-security audit.
