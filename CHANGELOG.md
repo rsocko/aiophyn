@@ -4,6 +4,8 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Accept unordered prediction confidences observed during read-only live checks;
+  preserve first-returned attribution and flag those events for review.
 - Add offline multi-device routing, explicit-selection, and usage/history
   isolation regressions without changing default device selection.
 - Remove the unused vulnerable Black development dependency and mitigate pytest

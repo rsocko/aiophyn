@@ -189,7 +189,30 @@ introduced.
 The older shared samples below document historical response structures, not a
 fresh live contract proof. The inventory POST envelope follows the historical
 experiment evidence pinned by the remediation work; no live write was attempted
-to re-establish it. The new harness currently has **offline evidence only**.
+to re-establish it.
+
+### Bounded live observations (2026-09-23 UTC)
+
+After explicit account-owner approval, two devices were checked sequentially
+with separate private local reports. Each run completed 13 checks with no
+failed, empty, or skipped checks: authentication, discovery, fixture catalog,
+device inventory, 1/7/30-day usage events, state, consumption, preferences,
+firmware, away-mode status, and the nine-read history comparison.
+Each used 22 send attempts (two Cognito plus 20 REST), below the 24-attempt cap.
+The fixed completed week's weekly/daily/repeated-week snapshots were consistent
+for both devices in these runs.
+
+An initial run exposed an unsupported diagnostic assumption: predictions need
+not be sorted by confidence. Synthetic regressions now preserve first-returned
+attribution and flag unordered confidence for review; both live runs then passed.
+No raw account/device identifiers, labels, credentials, or event captures were
+committed. No inventory/feedback writes, valve operations, or HA mutations ran.
+
+These observations establish only the checked account, devices, intervals, and
+response shapes at that time. They do not establish all API behavior, retention,
+pagination/completeness guarantees, revision ordering, or physical fixture
+classification accuracy. Alert endpoints and MQTT streaming were not part of
+these live runs.
 
 ### Dependencies
 

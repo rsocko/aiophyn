@@ -133,6 +133,46 @@ def test_numeric_strings_and_confidence_range():
         summarize_usage([item])
 
 
+@pytest.mark.parametrize("scores", [(0.2, 0.8), (0.8, 0.1, 0.9)])
+def test_unordered_predictions_keep_first_and_flag_review(scores):
+    item = event(3)
+    suggestions = [
+        {
+            "fixture_id": index + 7,
+            "fixture_name": "Sink" if index == 0 else "Toilet",
+            "confidence_score": score,
+        }
+        for index, score in enumerate(scores)
+    ]
+    item["latest_suggested_fixtures_result"]["suggested_fixtures"] = suggestions
+    original = json.dumps(item)
+    quality = _classify_event_quality(item, 0.7, 0.15)
+    assert quality["top_fixture"] == "Sink"
+    assert quality["top_confidence"] == scores[0]
+    assert quality["unordered_confidence"]
+    assert quality["needs_review"]
+    assert "unordered_confidence" in quality["review_reasons"]
+    summary = diag.safe_usage([item], 0.7, 0.15)
+    assert summary["total_gallons"] == 3
+    assert summary["fixtures"]["Sink"]["total_gallons"] == 3
+    assert "Toilet" not in summary["fixtures"]
+    assert summary["unordered_prediction_events"] == 1
+    assert summary["review_events"] == 1
+    assert diag.contract_summary([item], "events")["status"] == "passed"
+    assert json.dumps(item) == original
+
+
+def test_equal_or_descending_confidence_is_not_flagged_unordered():
+    item = event()
+    suggestions = item["latest_suggested_fixtures_result"]["suggested_fixtures"]
+    suggestions.extend([
+        {"fixture_name": "Toilet", "confidence_score": 0.8},
+        {"fixture_name": "Other", "confidence_score": 0.2},
+    ])
+    assert summarize_usage([item])["unordered_prediction_events"] == 0
+    assert summarize_usage([event(suggestions=False)])["unordered_prediction_events"] == 0
+
+
 def test_event_contract_rejects_empty_identifier():
     item = event()
     item["id"] = item["event_id"] = ""

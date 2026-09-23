@@ -58,8 +58,9 @@ def _classify_event_quality(event, low_confidence_threshold, ambiguity_gap_thres
         confidences.append(
             number(suggestion.get("confidence_score"), "confidence_score", 1)
         )
-    if any(right > left for left, right in zip(confidences, confidences[1:])):
-        raise PayloadError("suggested_fixtures must be ordered by confidence")
+    unordered = any(
+        right > left for left, right in zip(confidences, confidences[1:])
+    )
     result = {
         "total_flow": flow,
         "top_fixture": "Unknown",
@@ -68,11 +69,14 @@ def _classify_event_quality(event, low_confidence_threshold, ambiguity_gap_thres
         "confidence_gap": None,
         "is_low_confidence": False,
         "is_ambiguous": False,
+        "unordered_confidence": unordered,
         "has_user_feedback": bool(feedback),
         "feedback_conflict": False,
         "review_reasons": [],
     }
     reasons = result["review_reasons"]
+    if unordered:
+        reasons.append("unordered_confidence")
     if not suggestions:
         reasons.append("no_suggestions")
     else:
@@ -154,6 +158,7 @@ def summarize_usage(
         "algorithm_counts": dict(algorithms),
         "low_confidence_events": sum(q["is_low_confidence"] for q in quality),
         "ambiguous_events": sum(q["is_ambiguous"] for q in quality),
+        "unordered_prediction_events": sum(q["unordered_confidence"] for q in quality),
         "feedback_events": sum(q["has_user_feedback"] for q in quality),
         "feedback_conflicts": sum(q["feedback_conflict"] for q in quality),
         "review_events": sum(q["needs_review"] for q in quality),

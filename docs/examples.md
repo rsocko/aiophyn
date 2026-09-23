@@ -2,7 +2,9 @@
 
 Examples are **local, explicitly invoked live tools**, not offline tests.
 Importing them does not load credentials, parse arguments, log in or run an event
-loop. No live evidence was gathered while developing the offline harness.
+loop. Subsequent authorized, bounded read-only observations are documented in
+[testing](testing.md#bounded-live-observations-2026-09-23-utc); they do not prove
+all server behavior.
 See [configuration](configuration.md) for local credentials and
 [testing](testing.md#local-opt-in-read-only-checks) for the separately gated pytest
 harness.
@@ -75,7 +77,11 @@ event remains a counted event.
 Thresholds and confidence values must be finite and within 0-1. Flow must be
 finite and nonnegative. Numeric strings are accepted; missing or malformed flow
 or confidence fails explicitly, rather than silently becoming zero. Suggestions
-must be ordered by confidence. Unknown confidence is not a measured zero and
+are not guaranteed to be ordered by confidence: the first returned prediction
+still receives the volume, without sorting or assuming it is the highest score.
+Unordered confidence is counted in `unordered_prediction_events` and flagged
+for review, not rejected. The first-minus-second gap refers to returned order,
+not a ranking of all candidates. Unknown confidence is not a measured zero and
 is reported as null. Missing suggestions generate a review signal.
 
 User feedback presence generates a separate review signal. When both fixture
