@@ -289,8 +289,8 @@ def contract_summary(value, kind):
     return result
 
 
-def safe_usage(events, low, gap):
-    summary = summarize_usage(events, low, gap)
+def safe_usage(events, low, gap, fixture_names=None):
+    summary = summarize_usage(events, low, gap, fixture_names)
     algorithms = summary.pop("algorithm_counts")
     safe_algorithms = {}
     for name, count in algorithms.items():
@@ -312,12 +312,18 @@ def safe_usage(events, low, gap):
     # Custom fixture labels are not safe to publish; combine them without names.
     fixtures = summary.pop("fixtures")
     safe = {}
+
+    def public_label(name):
+        prefix = "Fixture type "
+        suffix = name[len(prefix):] if name.startswith(prefix) else ""
+        return name in SAFE_FIXTURES or (suffix.isascii() and suffix.isdecimal())
+
     for name, entry in fixtures.items():
-        if name in SAFE_FIXTURES:
+        if public_label(name):
             safe[name] = entry
-    custom = [entry for name, entry in fixtures.items() if name not in SAFE_FIXTURES]
+    custom = [entry for name, entry in fixtures.items() if not public_label(name)]
     if custom:
-        safe["Unpublished custom predictions"] = {
+        safe["Unpublished custom labels"] = {
             "total_gallons": sum(entry["total_gallons"] for entry in custom),
             "event_count": sum(entry["event_count"] for entry in custom),
             "average_confidence": None,
@@ -421,10 +427,21 @@ async def run_diagnostics(
                     "Selected device was not discovered for this account"
                 )
             now = datetime.now(timezone.utc)
+            fixture_names = {}
             if mode in {"live", "inventory", "comprehensive"}:
-                await check(
+                catalog = await check(
                     "fixture_catalog", api.home_inventory.get_fixture_types, "catalog"
                 )
+                for fixture in catalog:
+                    name = fixture.get("name")
+                    identity = fixture["home_inventory_type_id"]
+                    if isinstance(name, str) and name.strip():
+                        name = name.strip()
+                        if identity in fixture_names and fixture_names[identity] != name:
+                            raise PayloadError(
+                                "Catalog contains conflicting fixture names"
+                            )
+                        fixture_names[identity] = name
                 await check(
                     "device_inventory",
                     lambda: api.home_inventory.get_device_inventory(device_id),
@@ -439,7 +456,7 @@ async def run_diagnostics(
                         ),
                         "events",
                     )
-                    checks[-1]["usage"] = safe_usage(events, low, gap)
+                    checks[-1]["usage"] = safe_usage(events, low, gap, fixture_names)
             if mode in {"api", "comprehensive"}:
                 await check("state", lambda: api.device.get_state(device_id), "object")
                 await check(

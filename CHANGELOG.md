@@ -4,15 +4,17 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
-- Accept unordered prediction confidences observed during read-only live checks;
-  preserve first-returned attribution and flag those events for review.
+- Attribute example usage to explicit user-selected categories before models;
+  otherwise select the highest-confidence candidate, independently of returned
+  order. Preserve raw events and full volume, distinguish attribution sources,
+  and flag exact ties or inconsistent metadata for review without automatic writes.
 - Add offline multi-device routing, explicit-selection, and usage/history
   isolation regressions without changing default device selection.
 - Remove the unused vulnerable Black development dependency and mitigate pytest
   temporary-directory risks with private per-run roots, retaining Python 3.9.
   This does not remediate inherited dependency advisories.
 - Include unclassified volume in example usage totals and tolerate missing/null
-  predictions; label attribution as predicted, with separate feedback conflicts.
+  predictions; retain separate model-quality and feedback-conflict observations.
 - Make diagnostic examples import-safe, with explicit local configuration,
   sanitized reports, and nonzero exits for failed or incomplete checks.
 - Add default-off read-only diagnostics and bounded weekly/daily history

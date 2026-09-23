@@ -172,6 +172,15 @@ and redacted reports. Ignore tests use `git check-ignore` for representative
 root/nested private paths and `git ls-files` to catch already tracked secrets
 by path; this is not a content-secret scanner.
 
+`tests/fixtures/attribution_cases.json` supplies synthetic conformance vectors
+for user-first category attribution, independent of a runtime library API.
+Coverage includes ID-only and orphan user choices, normalized/zero IDs,
+comment/subfixture-only feedback, unsorted model scores, exact ties and reorder
+sensitivity, malformed fields, explicit model-metadata warnings under a valid
+human choice, label conflicts, and catalog reuse without additional reads.
+Bucket totals conserve full event volume; user choices do not inherit model
+confidence. Raw event objects remain unchanged and private labels stay redacted.
+
 Multi-device regressions in `test_usage_diagnostics.py` explicitly select the
 second synthetic device in both same-home and separate-home accounts, covering
 comprehensive reads, fixed history windows and the selected home's alerts.
@@ -203,10 +212,24 @@ The fixed completed week's weekly/daily/repeated-week snapshots were consistent
 for both devices in these runs.
 
 An initial run exposed an unsupported diagnostic assumption: predictions need
-not be sorted by confidence. Synthetic regressions now preserve first-returned
-attribution and flag unordered confidence for review; both live runs then passed.
+not be sorted by confidence. The initial fix preserved first-returned attribution
+and flagged unordered confidence for review; both live runs then passed.
+That attribution policy was subsequently superseded by explicit user choice,
+then highest-confidence model selection. The initial live observations do not
+by themselves validate that newer policy; its synthetic contract is described
+above.
 No raw account/device identifiers, labels, credentials, or event captures were
 committed. No inventory/feedback writes, valve operations, or HA mutations ran.
+
+The updated attribution policy was checked again on both devices at 01:12 UTC:
+each completed the same 13 checks with no failed, empty, or skipped checks,
+22 send attempts, and consistent history comparisons. The new report label,
+source-count totals, event counts, and conservation of fixture-bucket volume
+were verified across all six device/window summaries. These windows contained
+model-attributed events but no explicit user-attributed events and no invalid
+model metadata. User-override precedence is therefore synthetic test evidence,
+not a live feedback-write round trip. The corresponding offline suite passed
+342 tests with the opt-in live test deselected.
 
 These observations establish only the checked account, devices, intervals, and
 response shapes at that time. They do not establish all API behavior, retention,

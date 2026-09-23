@@ -7,6 +7,7 @@ import builtins
 from contextlib import nullcontext
 from datetime import timedelta
 import importlib
+from itertools import permutations
 import json
 import os
 from pathlib import Path
@@ -58,7 +59,10 @@ def test_classified_plus_unknown_total_is_five(prediction):
         "event_count": 1,
         "average_confidence": None,
     }
-    assert result["label"] == "Predicted fixture usage"
+    assert result["label"] == "Attributed fixture usage"
+    assert result["attribution_counts"] == {
+        "user_feedback": 0, "prediction": 1, "unknown": 1
+    }
 
 
 def test_empty_is_not_a_zero_volume_event():
@@ -89,7 +93,7 @@ def test_invalid_thresholds_rejected_even_for_empty_data(low, gap):
         summarize_usage([], low, gap)
 
 
-def test_strict_threshold_boundary_and_feedback_does_not_override_prediction():
+def test_user_feedback_overrides_prediction_without_inheriting_model_confidence():
     item = event()
     item["latest_suggested_fixtures_result"]["suggested_fixtures"] = [
         {"fixture_id": 7, "fixture_name": "Sink", "confidence_score": 0.7},
@@ -101,8 +105,14 @@ def test_strict_threshold_boundary_and_feedback_does_not_override_prediction():
     assert not quality["is_low_confidence"]
     assert not quality["is_ambiguous"]
     assert quality["feedback_conflict"]
+    assert quality["attributed_fixture"] == "Toilet"
+    assert quality["attribution_source"] == "user_feedback"
+    assert quality["attributed_confidence"] is None
+    assert not quality["needs_review"]
     result = summarize_usage([item], 0.71, 0.16)
-    assert result["fixtures"]["Sink"]["total_gallons"] == 2
+    assert result["fixtures"]["Toilet"]["total_gallons"] == 2
+    assert result["fixtures"]["Toilet"]["average_confidence"] is None
+    assert "Sink" not in result["fixtures"]
     assert result["low_confidence_events"] == result["ambiguous_events"] == 1
     assert result["feedback_conflicts"] == 1
     assert "private" not in json.dumps(result)
@@ -134,7 +144,7 @@ def test_numeric_strings_and_confidence_range():
 
 
 @pytest.mark.parametrize("scores", [(0.2, 0.8), (0.8, 0.1, 0.9)])
-def test_unordered_predictions_keep_first_and_flag_review(scores):
+def test_unordered_predictions_use_highest_confidence_and_preserve_input(scores):
     item = event(3)
     suggestions = [
         {
@@ -147,15 +157,18 @@ def test_unordered_predictions_keep_first_and_flag_review(scores):
     item["latest_suggested_fixtures_result"]["suggested_fixtures"] = suggestions
     original = json.dumps(item)
     quality = _classify_event_quality(item, 0.7, 0.15)
-    assert quality["top_fixture"] == "Sink"
-    assert quality["top_confidence"] == scores[0]
+    assert quality["top_fixture"] == "Toilet"
+    assert quality["top_confidence"] == max(scores)
+    assert quality["attribution_source"] == "prediction"
+    expected_gap = sorted(scores, reverse=True)[0] - sorted(scores, reverse=True)[1]
+    assert quality["confidence_gap"] == pytest.approx(expected_gap)
     assert quality["unordered_confidence"]
     assert quality["needs_review"]
     assert "unordered_confidence" in quality["review_reasons"]
     summary = diag.safe_usage([item], 0.7, 0.15)
     assert summary["total_gallons"] == 3
-    assert summary["fixtures"]["Sink"]["total_gallons"] == 3
-    assert "Toilet" not in summary["fixtures"]
+    assert summary["fixtures"]["Toilet"]["total_gallons"] == 3
+    assert "Sink" not in summary["fixtures"]
     assert summary["unordered_prediction_events"] == 1
     assert summary["review_events"] == 1
     assert diag.contract_summary([item], "events")["status"] == "passed"
@@ -173,6 +186,100 @@ def test_equal_or_descending_confidence_is_not_flagged_unordered():
     assert summarize_usage([event(suggestions=False)])["unordered_prediction_events"] == 0
 
 
+ATTRIBUTION_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "attribution_cases.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+
+@pytest.mark.parametrize("case", ATTRIBUTION_CASES, ids=lambda case: case["name"])
+def test_shared_attribution_contract(case):
+    item = case["event"]
+    before = json.dumps(item, sort_keys=True)
+    catalog = {int(key): value for key, value in case.get("catalog", {}).items()}
+    if "expected_error" in case:
+        with pytest.raises(PayloadError, match=case["expected_error"]):
+            _classify_event_quality(item, 0.7, 0.15, catalog)
+    else:
+        result = _classify_event_quality(item, 0.7, 0.15, catalog)
+        for key, expected in case["expected"].items():
+            assert result[key] == expected, key
+        summary = diag.safe_usage([item], 0.7, 0.15, catalog)
+        assert summary["total_gallons"] == 2
+        assert sum(entry["total_gallons"] for entry in summary["fixtures"].values()) == 2
+        assert summary["attribution_counts"][result["attribution_source"]] == 1
+        assert summary["invalid_prediction_events"] == int(result["invalid_prediction_metadata"])
+        assert "Private" not in json.dumps(summary)
+    assert json.dumps(item, sort_keys=True) == before
+
+
+@pytest.mark.parametrize("scores", permutations([0.9, 0.4, 0.8]))
+def test_highest_score_and_ranked_gap_are_order_independent(scores):
+    item = event()
+    item["latest_suggested_fixtures_result"]["suggested_fixtures"] = [
+        {"fixture_id": int(score * 10), "confidence_score": score}
+        for score in scores
+    ]
+    result = _classify_event_quality(item, 0.7, 0.15)
+    assert result["attributed_fixture_id"] == 9
+    assert result["attributed_confidence"] == 0.9
+    assert result["confidence_gap"] == 0.1
+
+
+def test_tie_requires_review_even_when_ambiguity_threshold_is_zero():
+    item = event()
+    item["latest_suggested_fixtures_result"]["suggested_fixtures"].append(
+        {"fixture_id": 8, "fixture_name": "Toilet", "confidence_score": 0.8}
+    )
+    result = _classify_event_quality(item, 0, 0)
+    assert result["attributed_fixture"] == "Sink"
+    assert result["review_reasons"] == ["tied_highest_confidence"]
+
+
+@pytest.mark.parametrize("feedback", [None, {}])
+def test_empty_feedback_does_not_request_review(feedback):
+    result = _classify_event_quality(
+        dict(event(), latest_user_feedback=feedback), 0.7, 0.15
+    )
+    assert result["attribution_source"] == "prediction"
+    assert result["review_reasons"] == []
+    assert not result["has_user_feedback"]
+
+
+@pytest.mark.parametrize("identity", [True, -1, 1.5, {}, [], "bad", "-1", " ", "1.5"])
+def test_invalid_explicit_feedback_id_never_silently_falls_back(identity):
+    item = dict(event(), latest_user_feedback={"fixture_id": identity})
+    with pytest.raises(PayloadError, match="fixture_id"):
+        summarize_usage([item])
+
+
+@pytest.mark.parametrize("value", [None, True, {}, [], "bad", "NaN", "Infinity", -1, 1.01])
+def test_human_selection_survives_invalid_optional_model_confidence(value):
+    item = dict(event(), latest_user_feedback={"fixture_id": 8})
+    item["latest_suggested_fixtures_result"]["suggested_fixtures"][0]["confidence_score"] = value
+    result = diag.safe_usage([item], 0.7, 0.15)
+    assert result["fixtures"]["Fixture type 8"]["total_gallons"] == 2
+    assert result["attribution_counts"]["user_feedback"] == 1
+    assert result["invalid_prediction_events"] == result["review_events"] == 1
+    assert diag.contract_summary([item], "events")["status"] == "passed"
+    item["total_flow"] = value
+    if value != 1.01:
+        with pytest.raises(PayloadError, match="total_flow"):
+            summarize_usage([item])
+
+
+def test_model_average_excludes_user_corrections_and_preserves_total():
+    user = dict(event(3), latest_user_feedback={"fixture_id": "7", "sub_fixture_id": 12})
+    result = summarize_usage([user, event(2), event(5, False)])
+    assert result["total_gallons"] == 10
+    assert result["fixtures"]["Sink"] == {
+        "total_gallons": 5, "event_count": 2, "average_confidence": 0.8
+    }
+    assert result["fixtures"]["Unknown"]["total_gallons"] == 5
+    assert result["attribution_counts"] == {"user_feedback": 1, "prediction": 1, "unknown": 1}
+
+
 def test_event_contract_rejects_empty_identifier():
     item = event()
     item["id"] = item["event_id"] = ""
@@ -187,7 +294,7 @@ def test_safe_report_does_not_include_custom_names():
     ] = "Private household address"
     result = diag.safe_usage([item], 0.7, 0.15)
     assert "Private" not in json.dumps(result)
-    assert result["fixtures"]["Unpublished custom predictions"]["total_gallons"] == 2
+    assert result["fixtures"]["Unpublished custom labels"]["total_gallons"] == 2
 
 
 @pytest.mark.parametrize(
@@ -316,6 +423,24 @@ def synthetic_api(monkeypatch):
     monkeypatch.setattr(diag, "async_get_api", AsyncMock(return_value=api))
     monkeypatch.setattr(diag, "bounded_cognito", lambda budget: nullcontext())
     return api
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode, label", [("usage", "Fixture type 8"), ("live", "Toilet")])
+async def test_feedback_catalog_enrichment_uses_only_existing_reads(synthetic_api, mode, label):
+    synthetic_api.home_inventory.get_fixture_types.return_value = [
+        {"home_inventory_type_id": 8, "name": "Toilet"}
+    ]
+    synthetic_api.device.get_water_usage_events.return_value = [
+        dict(event(3, False), latest_user_feedback={"fixture_id": 8})
+    ]
+    report = await diag.run_diagnostics(diag.Configuration("synthetic", "synthetic"), mode)
+    assert report["status"] == "passed"
+    usage = next(check["usage"] for check in report["checks"] if "usage" in check)
+    assert usage["fixtures"][label]["total_gallons"] == 3
+    assert usage["attribution_counts"]["user_feedback"] == 1
+    assert synthetic_api.home_inventory.get_fixture_types.await_count == (mode == "live")
+    synthetic_api.device.get_water_usage_events.assert_awaited_once()
 
 
 DEVICE_IDS = ("offline-device-one", "offline-device-two")
