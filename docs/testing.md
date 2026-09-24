@@ -162,6 +162,11 @@ The harness neither backfills nor deletes/imports Home Assistant statistics.
 
 ### Offline coverage of the harness
 
+For the later bounded inventory/event join assessment and its synthetic tests,
+see [sub-fixture evidence](subfixture-evidence.md). It distinguishes named
+inventory availability from individual usage attribution without changing
+runtime statistics.
+
 `test_usage_diagnostics.py`, `test_history_diagnostics.py` and
 `test_live_guards.py` use new, entirely synthetic fixtures (no private captures).
 They cover the 2+3=5 regression, null/missing predictions, zero versus empty,
