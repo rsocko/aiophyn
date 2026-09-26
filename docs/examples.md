@@ -145,8 +145,9 @@ It does not initiate a large historical backfill. Details, comparison limits and
 request limits are in [testing](testing.md#history-characterization).
 
 For long backfills, use bounded sequential windows rather than one huge API
-request. This is a recommendation for consumers, not automatic chunking by
-the SDK or this example. The HA integration's current 365-day selector cap is
+request. The SDK and this example do not automatically chunk requests; the
+companion HA feature branch implements seven-day chunk orchestration separately
+(not yet in the published integration beta5). Its current 365-day selector cap is
 an arbitrary local guard: a live one-device probe accepted 366 days, while a
 730-day request ended in HTTP 504, not a proven range-limit rejection.
 See [history request limits and chunking](testing.md#history-request-limits-and-chunking)

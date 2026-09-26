@@ -201,7 +201,7 @@ not an explicit date/length validation rejection and not evidence that older
 data is unavailable. No other device or longer chunked backfill was tested in
 this experiment. Timings depend on event density and service conditions.
 
-**Recommended approach for future long backfills:**
+**General guidance for consumers implementing long backfills:**
 
 - Split the requested overall period into bounded sequential windows, for
   example starting with 7-31 days per pull. This is a starting policy, not a
@@ -223,11 +223,36 @@ this experiment. Timings depend on event density and service conditions.
   caller-provided session can use a different timeout. Raising a timeout alone
   does not solve oversized responses, server caps, or gateway deadlines.
 
-**Chunked long-backfill orchestration is a recommendation, not functionality
-added by this documentation.** The SDK method remains one logical GET per call,
-the existing history diagnostic compares one week with daily reads, and the
-integration's current backfill path is not claimed to automatically split
-large requested periods. This experiment does not authorize more live probes.
+**Implementation status:** the SDK method remains one logical GET per call;
+the existing SDK history diagnostic compares one week with daily reads. The
+companion HA integration now implements automatic chunk orchestration on its
+feature branch at
+[`539a0f680b1ba836d7800c67da2218436cdc28cf`](https://github.com/rsocko/homeassistant-phyn/commit/539a0f680b1ba836d7800c67da2218436cdc28cf),
+not in the published integration beta5. Button, action, and recurring imports
+share nominal seven-day windows. Each later query starts 1 ms before its
+nominal boundary, making its actual span at most seven days plus 1 ms.
+Requests are sequentially paced; verified chunks commit independently, and an
+error stops further pulls while preserving accepted progress. Dry runs validate
+responses and preview the combined latest-observed event-ID map without writes.
+The overall 365-day selector guard remains separate from the per-request size.
+
+A separately authorized live comparison on 2026-09-26 used one device and
+the fixed interval **2026-08-26 00:00 UTC through 2026-09-26 00:00 UTC**.
+Seven history GETs compared a single whole-window response, five chunks using
+the exact HA boundaries/overlaps, and a repeated whole-window response.
+All returned HTTP 200. The whole responses and combined chunks had identical
+event-ID sets, full decoded event records, normalized contributions, and
+per-category volumes. There were no missing, extra, changed, or duplicate
+events, and no baseline drift during the comparison.
+
+No sampled events were within 1 ms of the internal boundaries. Consequently
+this live comparison did **not** exercise exact-boundary duplication or prove
+server boundary semantics. Actual Recorder tests in the companion integration
+cover boundary selection, duplicates, corrections, partial writes, restart,
+retry, and cancellation. The live run performed no HA imports or account writes.
+This establishes equivalence for the sampled responses, not global completeness,
+maximum retention, or success for arbitrarily long backfills. No further live
+requests are authorized by this documentation.
 
 ### Offline coverage of the harness
 

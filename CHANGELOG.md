@@ -4,6 +4,9 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Distinguish the companion HA feature branch's automatic seven-day chunk
+  orchestration from the SDK's unchanged single-GET primitive. Document the
+  bounded whole-versus-chunk live comparison and its boundary/coverage limits.
 - Document observed history-request behavior: 366 days accepted on one device,
   730 days ending in a gateway timeout, and no established maximum retention.
   Clarify the arbitrary integration-side 365-day selector guard and recommend
