@@ -228,7 +228,9 @@ the existing SDK history diagnostic compares one week with daily reads. The
 companion HA integration now implements automatic chunk orchestration on its
 feature branch at
 [`539a0f680b1ba836d7800c67da2218436cdc28cf`](https://github.com/rsocko/homeassistant-phyn/commit/539a0f680b1ba836d7800c67da2218436cdc28cf),
-not in the published integration beta5. Button, action, and recurring imports
+and published it in
+[integration beta6](https://github.com/rsocko/homeassistant-phyn/releases/tag/v2026.9.2-beta.6).
+Beta5 and earlier do not include it. Button, action, and recurring imports
 share nominal seven-day windows. Each later query starts 1 ms before its
 nominal boundary, making its actual span at most seven days plus 1 ms.
 Requests are sequentially paced; verified chunks commit independently, and an

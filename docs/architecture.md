@@ -145,8 +145,10 @@ of one huge request. The companion HA integration implements this orchestration
 on its feature branch at
 [`539a0f6`](https://github.com/rsocko/homeassistant-phyn/commit/539a0f680b1ba836d7800c67da2218436cdc28cf):
 nominal seven-day windows with a 1 ms overlap at internal boundaries and
-sequential pacing. That change is not included in the published integration
-beta5. **The SDK primitive is unchanged:** `get_water_usage_events` still
+sequential pacing. This is available in integration
+[beta6](https://github.com/rsocko/homeassistant-phyn/releases/tag/v2026.9.2-beta.6);
+beta5 and earlier do not include it. **The SDK primitive is unchanged:**
+`get_water_usage_events` still
 performs one logical GET and does not automatically chunk requests. See
 [history request limits and chunking](testing.md#history-request-limits-and-chunking)
 for the observations, local limits, and operational caveats.
