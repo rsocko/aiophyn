@@ -1,4 +1,5 @@
 """ Module providing a MQTT provider """
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -19,8 +20,23 @@ from .const import API_BASE
 
 _LOGGER = logging.getLogger(__name__)
 
+# How long to wait for the _on_disconnect callback before giving up.
+# A missing callback (e.g. when MQTT is already down at unload time) would
+# otherwise block disconnect_and_wait forever — the root cause of the reload
+# hang described in issues #56 / #60.
+_DISCONNECT_WAIT_TIMEOUT: float = 10.0
+
 class AIOHelper:
-    """Helper class for Asynchronous IO"""
+    """Helper class for Asynchronous IO
+
+    paho-mqtt invokes the socket callbacks from whichever thread drives the
+    client. ``MQTTClient.connect()`` runs ``paho.connect()`` in an executor,
+    so ``on_socket_open`` (and the write-register callbacks issued while
+    sending CONNECT) arrive on a worker thread. Event-loop methods such as
+    ``add_reader`` and ``create_task`` are not thread-safe, so every callback
+    is marshalled onto the loop thread with ``call_soon_threadsafe`` when
+    needed (issue #67).
+    """
     def __init__(self, client: paho_mqtt.Client) -> None:
         self.loop = asyncio.get_running_loop()
         self.client = client
@@ -31,6 +47,17 @@ class AIOHelper:
             self._on_socket_unregister_write
         self.misc_task: Optional[asyncio.Task] = None
 
+    def _run_on_loop(self, func, *args) -> None:
+        """Run ``func`` on the event-loop thread, directly if already there."""
+        try:
+            on_loop_thread = asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            on_loop_thread = False
+        if on_loop_thread:
+            func(*args)
+        else:
+            self.loop.call_soon_threadsafe(func, *args)
+
     def _on_socket_open(self,
                         client: paho_mqtt.Client,
                         userdata: Any,
@@ -38,12 +65,20 @@ class AIOHelper:
                         ) -> None:
         # pylint: disable=unused-argument
         _LOGGER.info("MQTT Socket Opened")
+        self._run_on_loop(self._socket_open_on_loop, client, sock)
+
+    def _socket_open_on_loop(self, client: paho_mqtt.Client, sock: socket.socket) -> None:
         self.loop.add_reader(sock, client.loop_read)
+        if self.misc_task is not None and not self.misc_task.done():
+            self.misc_task.cancel()
         self.misc_task = self.loop.create_task(self.misc_loop())
 
     def _on_socket_close(self, client: paho_mqtt.Client, userdata: Any, sock: socket.socket) -> None:
         # pylint: disable=unused-argument
         _LOGGER.info("MQTT Socket Closed")
+        self._run_on_loop(self._socket_close_on_loop, sock)
+
+    def _socket_close_on_loop(self, sock: socket.socket) -> None:
         self.loop.remove_reader(sock)
         if self.misc_task is not None:
             self.misc_task.cancel()
@@ -54,7 +89,7 @@ class AIOHelper:
                                   sock: socket.socket
                                   ) -> None:
         # pylint: disable=unused-argument
-        self.loop.add_writer(sock, client.loop_write)
+        self._run_on_loop(self.loop.add_writer, sock, client.loop_write)
 
     def _on_socket_unregister_write(self,
                                     client: paho_mqtt.Client,
@@ -62,7 +97,7 @@ class AIOHelper:
                                     sock: socket.socket
                                     ) -> None:
         # pylint: disable=unused-argument
-        self.loop.remove_writer(sock)
+        self._run_on_loop(self.loop.remove_writer, sock)
 
     async def misc_loop(self) -> None:
         """Loop for MQTT"""
@@ -150,6 +185,7 @@ class MQTTClient:
 
     async def connect(self):
         """ Create a conenction to the MQTT server """
+        self.disconnect_evt = None
         self.host, path = await self.get_mqtt_info()
         self.client.ws_set_options(path, headers={'Host': self.host})
 
@@ -177,15 +213,56 @@ class MQTTClient:
             )
     
     def disconnect(self):
-        """Disconnect from server"""
+        """Disconnect from server.
+
+        This is an intentional disconnect: ``disconnect_evt`` stays set
+        afterwards so that a late ``_on_disconnect`` callback does not spawn
+        a reconnect loop on a client the caller has discarded.  ``connect()``
+        clears it again.
+        """
         self.disconnect_evt = asyncio.Event()
         _LOGGER.info("MQTT client disconnecting...")
+
+        # Stop the reconnect machinery: the hourly keepalive timer would
+        # otherwise resurrect this client via _process_reconnect, and an
+        # in-flight reconnect loop (spawned by _on_disconnect or
+        # _process_reconnect) should not keep retrying past an explicit
+        # disconnect request.
+        self.reconnect_timer.cancel()
+        if self.connect_task is not None and not self.connect_task.done():
+            self.connect_task.cancel()
+
+        if not self.client.is_connected():
+            # paho-mqtt only invokes on_disconnect for a socket it is
+            # actually tearing down. If we were never connected, or already
+            # dropped (e.g. mid-reconnect-loop after a real disconnect),
+            # there is nothing to wait for and on_disconnect will never
+            # fire — set the event ourselves so callers don't hang.
+            self.disconnect_evt.set()
+            return
+
         self.client.disconnect()
-    
-    async def disconnect_and_wait(self):
-        """Disconnect from server and wait"""
+
+    async def disconnect_and_wait(self, timeout: Optional[float] = None) -> None:
+        """Disconnect from the server and wait for the callback to confirm.
+
+        Returns promptly when the client is already disconnected (paho never
+        fires ``on_disconnect`` in that case).  Bounded by ``timeout``
+        (default ``_DISCONNECT_WAIT_TIMEOUT``) so a caller that omits its own
+        timeout can't be left hanging on a disconnect that paho-mqtt never
+        acks, e.g. a dead peer with no FIN observed yet.
+        """
+        if timeout is None:
+            timeout = _DISCONNECT_WAIT_TIMEOUT
         self.disconnect()
-        await self.disconnect_evt.wait()
+        try:
+            await asyncio.wait_for(self.disconnect_evt.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Timed out after %ss waiting for MQTT disconnect callback; "
+                "proceeding as disconnected",
+                timeout,
+            )
 
     async def get_mqtt_info(self):
         """ Gets WebSocket URL and parameters for a MQTT connection
@@ -194,8 +271,8 @@ class MQTTClient:
         user_id = urllib.parse.quote_plus(self.api.username)
         try:
             wss_data = await self.api._request("post", f"{API_BASE}/users/{user_id}/iot_policy", token_type="id")
-        except:
-            Exception("Could not get WebSocket/MQTT url from API")
+        except Exception as err:
+            raise Exception("Could not get WebSocket/MQTT url from API") from err
 
         match = re.match(r'wss:\/\/([a-zA-Z0-9\.\-]+)(\/mqtt?.*)', wss_data['wss_url'])
         if not match:
@@ -207,9 +284,20 @@ class MQTTClient:
     async def subscribe(self, topic):
         """Subscribe to a MQTT topic"""
         _LOGGER.info("Attempting to subscribe to: %s", topic)
+        # Track subscription intent (not SUBACK) so the reconnect loop
+        # re-subscribes even if the ack is lost or the connection drops
+        # before it arrives.
+        if topic not in self.topics:
+            self.topics.append(topic)
         res, msg_id = self.client.subscribe(topic, 0)
+        if res != paho_mqtt.MQTT_ERR_SUCCESS:
+            _LOGGER.warning(
+                "Subscribe to %s failed (%s); will retry on reconnect",
+                topic,
+                paho_mqtt.error_string(res),
+            )
+            return
         self.pending_acks[msg_id] = topic
-
 
     def _on_connect(self,
                     client: paho_mqtt.Client,
@@ -246,7 +334,7 @@ class MQTTClient:
             # The server connection was dropped, attempt to reconnect
             _LOGGER.info("MQTT Server Disconnected, reason: %s", paho_mqtt.error_string(reason_code))
             self.reconnect_timer.cancel()
-            if self.connect_task is None:
+            if self.connect_task is None or self.connect_task.done():
                 self.connect_task = asyncio.create_task(self._do_reconnect(True))
         self.connect_evt.clear()
 
@@ -255,15 +343,35 @@ class MQTTClient:
         return self.client.is_connected()
 
     async def _process_reconnect(self):
-        #self.connect_task = True
         _LOGGER.info("Processing reconnect request")
 
-        self.disconnect_evt = asyncio.Event()
-        if self.is_connected():
-            self.client.disconnect()
-            await self.disconnect_evt.wait()
+        # If a reconnect loop is already running (e.g. recovering from an
+        # unexpected drop), don't interfere — it will self-heal and re-subscribe.
+        # Restart the keepalive timer so we revisit in another hour.
+        if self.reconnect_evt.is_set():
+            _LOGGER.info("Reconnect already in progress, skipping keepalive cycle")
+            self.reconnect_timer.start(3600)
+            return
 
-        self.connect_task = asyncio.create_task(self._do_reconnect(True))
+        # If disconnected with no loop running, spawn a reconnect now.
+        if not self.is_connected():
+            if self.connect_task is None or self.connect_task.done():
+                _LOGGER.info("MQTT disconnected at keepalive; spawning reconnect")
+                self.connect_task = asyncio.create_task(self._do_reconnect(True))
+            return
+
+        # Connection is live and idle. Force a fresh connection to
+        # re-fetch the wss URL (which refreshes credentials) and re-subscribe.
+        self.disconnect_evt = asyncio.Event()
+        self.client.disconnect()
+        await self.disconnect_evt.wait()
+        # Clear the intentional-disconnect marker before starting the
+        # reconnect loop, so that any unexpected drop during reconnection
+        # is treated as unintentional (i.e. triggers another reconnect).
+        self.disconnect_evt = None
+
+        if self.connect_task is None or self.connect_task.done():
+            self.connect_task = asyncio.create_task(self._do_reconnect(True))
 
     async def _do_reconnect(self, first: bool = False) -> None:
         if self.reconnect_evt.is_set():
@@ -275,52 +383,54 @@ class MQTTClient:
         last_err: Exception = Exception()
         connect_attempts = 0
         t: float = 2.
-        while True:
-            if not first:
+        try:
+            while True:
+                if not first:
+                    try:
+                        if connect_attempts > 6:
+                            t = 60.
+                        elif connect_attempts > 3:
+                            t = 10.
+                        _LOGGER.debug("MQTT throttle for %s seconds", t)
+                        await asyncio.sleep(t)
+                    except asyncio.CancelledError:
+                        raise
+                first = False
+                connect_attempts += 1
                 try:
-                    if connect_attempts > 6:
-                        t = 60.
-                    elif connect_attempts > 3:
-                        t = 10.
-                    _LOGGER.debug("MQTT throttle for %s seconds", t)
-                    await asyncio.sleep(t)
+                    self.host, path = await self.get_mqtt_info()
+                    self.client.ws_set_options(path, headers={'Host': self.host})
+                    _LOGGER.info("Attempting to reconnnect...")
+                    await self.event_loop.run_in_executor(
+                            None,
+                            self.client.connect,
+                            self.host,
+                            self.port,
+                        )
+
+                    await asyncio.wait_for(self.connect_evt.wait(), timeout=2.)
+                    if not self.connect_evt.is_set():
+                        _LOGGER.info("Timeout while waiting for MQTT connection")
+                        continue
+
+                    # Re-subscribe to all topics; drop acks from the old session.
+                    self.pending_acks.clear()
+                    topics = list(set(self.topics))
+                    tasks = [self.subscribe(topic) for topic in topics]
+                    await asyncio.gather(*tasks)
                 except asyncio.CancelledError:
-                    self.reconnect_evt.clear()
                     raise
-            first = False
-            connect_attempts += 1
-            try:
-                self.host, path = await self.get_mqtt_info()
-                self.client.ws_set_options(path, headers={'Host': self.host})
-                _LOGGER.info("Attempting to reconnnect...")
-                await self.event_loop.run_in_executor(
-                        None,
-                        self.client.connect,
-                        self.host,
-                        self.port,
-                    )
-
-                await asyncio.wait_for(self.connect_evt.wait(), timeout=2.)
-                if not self.connect_evt.is_set():
-                    _LOGGER.info("Timeout while waiting for MQTT connection")
+                except Exception as e:
+                    if type(last_err) is not type(e) or last_err.args != e.args:
+                        _LOGGER.warning("MQTT Connection Error")
+                        last_err = e
                     continue
-
-                # Re-subscribe to all topics
-                topics = list(set(self.topics))
-                tasks = [self.subscribe(topic) for topic in topics]
-                await asyncio.gather(*tasks)
-            except asyncio.CancelledError:
-                self.reconnect_evt.clear()
-                raise
-            except Exception as e:
-                if type(last_err) is not type(e) or last_err.args != e.args:
-                    _LOGGER.warning("MQTT Connection Error")
-                    last_err = e
-                continue
-            break
-        self.reconnect_evt.clear()
-        self.disconnect_evt = None
-        self.connect_task = None
+                break
+        finally:
+            # Always release the reconnect lock and clean up task/event state so
+            # that subsequent disconnect events can trigger a new reconnect attempt.
+            self.reconnect_evt.clear()
+            self.connect_task = None
 
     def _on_message(
         self, client: paho_mqtt.Client, userdata: Any, message: paho_mqtt.MQTTMessage
@@ -352,7 +462,6 @@ class MQTTClient:
         # pylint: disable=unused-argument
         if mid in self.pending_acks:
             _LOGGER.info("Subscribed to: %s", self.pending_acks[mid])
-            self.topics.append(self.pending_acks[mid])
             del self.pending_acks[mid]
         else:
             _LOGGER.info("Subscribed: %s %s %s", userdata, str(mid), str(granted_qos))

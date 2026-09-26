@@ -1,14 +1,138 @@
 # aiophyn
 
-An asynchronous library for Phyn Smart Water devices including Kohler's H2Wise+.
+An asynchronous Python library for [Phyn](https://www.phyn.com/) Smart Water devices, including Kohler's H2Wise+.
 
-This library is initially focused on supporting a Phyn integration for Home Assistant, providing:
+Built to support the [Phyn integration for Home Assistant](https://github.com/jordanruthe/homeassistant-phyn), this library provides a complete async interface to the Phyn cloud API.
 
-- Device state
-- Water consumption
-- Shutoff valve control
-- Get and set away mode
+## Features
+
+- **Device state** — temperature, pressure, flow, valve status, online status
+- **Water consumption** — daily/monthly/yearly with hourly breakdowns
+- **Water usage events** — individual events with ML-based fixture predictions
+- **Home inventory** — fixture type catalog and per-device fixture configuration
+- **Shutoff valve control** — open/close the water shutoff valve
+- **Away mode** — get, enable, and disable away mode
+- **Auto-shutoff** — get status, enable/disable with optional timer
+- **Health tests** — view history and run standard/extended leak tests
+- **Firmware info** — current version and upgrade history
+- **Device preferences** — read and set device configuration
+- **Real-time streaming** — MQTT over WebSockets for live device updates
+- **Kohler H2Wise+** — uses the unified Phyn authentication path; the legacy partner bridge is no longer included
+
+## Quick Start
+
+```python
+import asyncio
+from aiohttp import ClientSession
+from aiophyn import async_get_api
+
+async def main():
+    async with ClientSession() as session:
+        api = await async_get_api(
+            "your_email@example.com",
+            "your_password",
+            session=session,
+        )
+
+        homes = await api.home.get_homes("your_email@example.com")
+        device_id = homes[0]["device_ids"][0]
+
+        state = await api.device.get_state(device_id)
+        print(f"Temperature: {state['temperature']['mean']}°F")
+        print(f"Pressure: {state['pressure']['mean']} PSI")
+        print(f"Valve: {state['sov_status']['v']}")
+
+asyncio.run(main())
+```
+
+## Installation
+
+Requires Python 3.9 or newer. To install the published release:
+
+```bash
+pip install aiophyn
+```
+
+The fixture-usage feature branch is not necessarily available on PyPI. To try
+that branch explicitly (use a reviewed commit SHA instead of the branch name
+for a reproducible installation):
+
+```bash
+pip install "aiophyn @ git+https://github.com/rsocko/aiophyn.git@feature/fixture-usage"
+```
+
+The validated remediation is included in `feature/fixture-usage`. The initial
+checkpoint was `972f16c8fb0ede1a2f3365680a972f70c47b6fe7`; the subsequent
+`42d35d61e338da4b34b5074490782a80419a31cd` checkpoint includes user-first
+attribution diagnostics, multi-device coverage, and development-tool mitigations.
+The temporary validation branch was removed after promotion; the tested
+checkpoint remains reachable through the feature branch. It includes the corrected Home
+Assistant authentication dependency and diagnostic harness. Use a reviewed
+immutable commit for paired testing. These changes have not been promoted to
+`main` or published to PyPI.
+
+### Fork development prerelease
+
+The fork development version is **`2026.9.2.dev1`**, based on the validated
+`42d35d6` runtime with no behavior changes. Its wheel and source distribution
+are intended for the GitHub prerelease
+[`v2026.9.2.dev1`](https://github.com/rsocko/aiophyn/releases/tag/v2026.9.2.dev1),
+not upstream PyPI. Release assets include `SHA256SUMS`; verify the selected
+artifact against that file. Consumers should pin the exact asset URL and hash,
+not a moving branch or the older `2026.9.1` version string.
+
+For Home Assistant, use the matching integration prerelease and its pinned
+library requirement. Installing the library alone does not update an installed
+HACS integration or persist a package override across container recreation.
+Treat this as a test-instance candidate, not a production release.
+
+For development, use Poetry 2.2.1 and the checked-in dependency lock:
+
+```bash
+git clone --branch feature/fixture-usage https://github.com/rsocko/aiophyn.git
+cd aiophyn
+poetry sync --with dev
+poetry run python -m pytest tests
+```
+
+## Documentation
+
+Detailed documentation is available in the [`docs/`](docs/) directory:
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | Class structure, design patterns, and component interactions |
+| [Project Structure](docs/project-structure.md) | Repository layout and file descriptions |
+| [Examples](docs/examples.md) | Guide to the runnable example scripts |
+| [Testing](docs/testing.md) | Test suite documentation — what each test validates and how to run them |
+| [Configuration](docs/configuration.md) | Environment variables, `.env` setup, and library parameters |
+
+## CI Tests and Packaging
+
+`.github/workflows/smoke-test.yml` runs on all pull requests and pushes to
+`main`, `feature/**` (including `feature/fixture-usage`), `work/**`,
+`validation/**`, and `rsocko-*`. Python 3.9, 3.12, and 3.14 each run the offline unit/contract suite
+against the Poetry editable install, then verify wheel and sdist installations
+in clean environments outside the checkout. No Phyn credentials are required.
+
+Checks cover installed-package provenance, version consistency, supported
+exports (`async_get_api`, `HomeInventory`, `API`, `MQTTClient`), representative
+fixture API calls through an injected offline transport, runtime dependencies,
+`pip check`, strict Twine metadata checks, and rebuilding a source archive
+without Git metadata. Release publishing runs the same checks before upload.
+See [Testing](docs/testing.md) for local commands and dependency-lock details.
+
+Live checks are deselected by default, even when credentials are present.
+The optional read-only harness requires explicit selection and `--run-live`;
+it does not enable inventory changes, feedback, or valve operations. Installing
+the harness does not authorize account access. See
+[local live checks](docs/testing.md#local-opt-in-read-only-checks) for limits
+and safe configuration.
 
 ## Acknowledgements
 
 This work follows the example of @bachya's excellent [aioflo](https://github.com/bachya/aioflo) library for Moen Flo devices.
+
+## License
+
+[MIT](LICENSE)

@@ -1,5 +1,8 @@
 """Define /devices endpoints."""
-from typing import Awaitable, Any, Callable, Optional
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Awaitable, Any, Callable, Optional, Union
 
 from .const import API_BASE
 
@@ -14,8 +17,24 @@ class Device:
     async def get_state(self, device_id: str) -> dict:
         """Return state of a device.
 
+        Returns the current device state including sensor readings,
+        valve status, and configuration.
+
         :param device_id: Unique identifier for the device
         :type device_id: ``str``
+        :return: Dict with device state. Key fields:
+            - device_id (str), product_code (str), serial_number (str)
+            - fw_version (str): Firmware version as numeric string (e.g. "40809001")
+            - sov_status.v (str): Valve state — "Open", "Closed", "Partial", "LeakExp"
+            - online_status.v (str): "online" or "offline"
+            - temperature (dict): min, max, mean (floats in °F), ts
+            - pressure (dict): min, median, max, mean, percentile95,
+              pressure_threshold_95, percentile5 (floats in PSI), ts
+            - flow (dict): min, max, mean (floats in GPM), ts
+            - signal_strength (int): WiFi RSSI in dBm
+            - auto_shutoff_enable (bool): Whether auto shutoff is enabled
+            - auto_shutoff_eligible (int): Eligibility percentage (0-100)
+            - timezone (str), partner (str), users (list[str]), created_ts (int)
         :rtype: ``dict``
         """
         return await self._request("get", f"{API_BASE}/devices/{device_id}/state")
@@ -25,9 +44,9 @@ class Device:
         device_id: str,
         duration: str,
         precision: int = 6,
-        details: Optional[str] = False,
-        event_count: Optional[str] = False,
-        comparison: Optional[str] = False,
+        details: bool = False,
+        event_count: bool = False,
+        comparison: bool = False,
     ) -> dict:
         """Return water consumption of a device.
 
@@ -65,17 +84,24 @@ class Device:
             "get", f"{API_BASE}/devices/{device_id}/consumption/details", params=params
         )
 
-    async def get_water_statistics(self, device_id: str, from_ts, to_ts):
-        """Get statistics about a PW1 sensor
+    async def get_water_statistics(self, device_id: str, from_ts: int, to_ts: int) -> list[dict[str, Any]]:
+        """Get statistics about a device sensor.
+
+        Returns daily statistics including flow, pressure, temperature,
+        plumbing type, quiet periods, and eco-water detection data.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :param from_ts: Lower bound timestamp. This is a timestamp with thousands as integer
+        :param from_ts: Lower bound timestamp in milliseconds (13 digits)
         :type from_ts: int
-        :param to_ts: Upper bound timestamp. This is a timestamp with thousands as integer
+        :param to_ts: Upper bound timestamp in milliseconds (13 digits)
         :type to_ts: int
-        :return: List of dictionaries of results. 
-        :rtype: List[dict[str, Any]]
+        :return: List of daily statistics entries.
+            Each entry contains flow (min/max/mean), pressure (min/median/max/mean/
+            percentile95/pressure_threshold_95/percentile5), temperature (min/max/mean),
+            plus_rt_threshold, device_id, plumbing_type, ecowater_found_today,
+            device_local_date, ecowater_exist, quiet_periods, and ts.
+        :rtype: list[dict[str, Any]]
         """
         params = {
             "from_ts": from_ts,
@@ -86,7 +112,7 @@ class Device:
             "get", f"{API_BASE}/devices/{device_id}/water_statistics/history/", params=params
         )
 
-    async def open_valve(self, device_id: str) -> None:
+    async def open_valve(self, device_id: str) -> dict:
         """Open a device shutoff valve.
 
         :param device_id: Unique identifier for the device
@@ -98,7 +124,7 @@ class Device:
             f"{API_BASE}/devices/{device_id}/sov/Open",
         )
 
-    async def close_valve(self, device_id: str) -> None:
+    async def close_valve(self, device_id: str) -> dict:
         """Close a device shutoff valve.
 
         :param device_id: Unique identifier for the device
@@ -157,81 +183,101 @@ class Device:
         )
     
     async def get_autoshuftoff_status(self, device_id: str) -> dict:
-        """Get phyn device preferences.
+        """Get auto shutoff status for a device.
+
+        Returns the current auto shutoff configuration including whether
+        it is enabled and the eligibility percentage.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :return: List of dicts with the following keys: created_ts, device_id, name, updated_ts, value
+        :return: Dict with auto_shutoff_enable (bool) and auto_shutoff_eligible (int).
         :rtype: dict
         """
         return await self._request(
             "get", f"{API_BASE}/devices/{device_id}/auto_shutoff"
         )
-    
 
-    async def get_device_preferences(self, device_id: str) -> dict:
-        """Get phyn device preferences.
+    async def get_device_preferences(self, device_id: str) -> list[dict]:
+        """Get device preferences.
+
+        Returns all preferences configured for the device, such as
+        leak_sensitivity_away_mode and scheduler_enable.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :return: List of dicts with the following keys: created_ts, device_id, name, updated_ts, value
-        :rtype: dict
+        :return: List of preference dicts, each with name (str), value (str), and device_id (str).
+        :rtype: list[dict]
         """
         return await self._request(
             "get", f"{API_BASE}/preferences/device/{device_id}"
         )
     
     async def get_health_tests(self, device_id: str) -> dict:
-        """Get phyn device preferences.
+        """Get health test history for a device.
+
+        Returns grouped health/leak test results including pass/fail status.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :return: List of dicts with the following keys
+        :return: Dict with ``data`` key containing list of test results.
+            Each test has end_time, is_warn (bool), is_leak (bool), and other fields.
         :rtype: dict
         """
         return await self._request(
             "get", f"{API_BASE}/devices/{device_id}/health_tests?list_type=grouped"
         )
     
-    async def get_latest_firmware_info(self, device_id: str) -> dict:
-        """Get Latest Firmware Information
+    async def get_latest_firmware_info(self, device_id: str) -> list[dict]:
+        """Get latest firmware information for a device.
+
+        .. note::
+            The API returns a list; callers typically use ``[0]`` to get
+            the first (and usually only) entry.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :return: Returns dict with fw_img_name, fw_version, product_code
-        :rtype: dict
+        :return: List of firmware info dicts. Each contains device_id (str),
+            server_ts (int, milliseconds), fw_version (int, e.g. 40809001),
+            and upgraded_seconds (int, epoch seconds of last upgrade).
+        :rtype: list[dict]
         """
         return await self._request(
             "get", f"{API_BASE}/firmware/latestVersion/v2?device_id={device_id}"
         )
 
-    async def run_leak_test(self, device_id: str, extended_test: bool = False):
-        """Run a leak test
+    async def run_leak_test(self, device_id: str, extended_test: Union[bool, str] = False) -> dict:
+        """Run a leak test.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :param extended_test: True if the test be extended, defaults to False
-        :type extended_test: bool, optional
+        :param extended_test: Whether to run an extended test. Accepts bool or
+            string ("true"/"false") for compatibility with HA service calls.
+        :type extended_test: bool or str, optional
+        :return: API response
+        :rtype: dict
         """
+        if isinstance(extended_test, str):
+            extended_test = extended_test.lower() == "true"
         data = {
             "initiator": "App",
-            "test_duration": "e" if extended_test is True else "s"
+            "test_duration": "e" if extended_test else "s"
         }
         return await self._request(
             "post", f"{API_BASE}/devices/{device_id}/health_tests", json=data
         )
 
-    async def set_autoshutoff_enabled(self, device_id: str, shutoff_on: bool, time: int | None = None) -> None:
-        """Set autoshutoff enabled
+    async def set_autoshutoff_enabled(self, device_id: str, shutoff_on: bool, time: int | None = None) -> dict:
+        """Enable or disable auto shutoff for a device.
 
         :param device_id: Unique identifier for the device
         :type device_id: str
-        :param shutoff_on: Turn autoshutoff on (True) or off (False). If false, also turn off for amount of time
+        :param shutoff_on: True to enable auto shutoff, False to disable.
         :type shutoff_on: bool
-        :param time: Time for shutoff in seconds if disabling (30, 3600, 21600, 86400), or blank for indefinite
-        :type time: int | None
-        :param data: List of dicts which have the keys: device_id, name, value
-        :type data: List[dict]
+        :param time: When disabling, duration in seconds before re-enabling
+            (e.g. 30, 3600, 21600, 86400). None for indefinite.
+        :type time: int or None
+        :return: API response
+        :rtype: dict
         """
         url = f"{API_BASE}/devices/{device_id}/auto_shutoff/status/"
         if shutoff_on == True:
@@ -254,4 +300,109 @@ class Device:
         """
         return await self._request(
             "post", f"{API_BASE}/preferences/device/{device_id}", json=data
+        )
+
+    async def get_water_usage_events(
+        self,
+        device_id: str,
+        from_datetime: Union[datetime, int, None] = None,
+        to_datetime: Union[datetime, int, None] = None,
+        *,
+        from_ts: Optional[int] = None,
+        to_ts: Optional[int] = None,
+    ) -> list[dict]:
+        """Get water usage events with fixture predictions.
+
+        Fetches individual water usage events for the specified time range,
+        including ML-based fixture predictions and confidence scores.
+
+        :param device_id: Unique identifier for the device
+        :type device_id: str
+        :param from_datetime: Start of time range, datetime or millisecond epoch
+        :type from_datetime: datetime or int
+        :param to_datetime: End of time range, datetime or millisecond epoch
+        :type to_datetime: datetime or int
+        :param from_ts: Alternative start in milliseconds (upstream keyword)
+        :type from_ts: int
+        :param to_ts: Alternative end in milliseconds (upstream keyword)
+        :type to_ts: int
+        :raises TypeError: A bound is missing, duplicated, or has an invalid type.
+        :return: List of water usage events. Each event contains:
+            - id (str): UUID-format event identifier
+            - device_id (str): Device identifier
+            - product_code (str): e.g. "PP2"
+            - open_edge_timestamp (int): Start time in milliseconds
+            - close_edge_timestamp (int): End time in milliseconds
+            - total_flow (float): Total water flow in gallons
+            - flow_rate (float): Flow rate in GPM
+            - latest_user_feedback (dict): User correction, empty ``{}`` if none
+            - latest_suggested_fixtures_result (dict): Contains:
+                - algorithm_name (str): e.g. "ruleflowtimefeatures"
+                - suggested_fixtures (list[dict]): Each with fixture_id (int),
+                  fixture_name (str), confidence_score (float),
+                  prediction_algorithm (str): Classification source. Known values:
+                    "clustering" (ML flow-pattern matching),
+                    "heuristics" (rule-based fallback),
+                    "user-feedback" (user-corrected),
+                    "bayesian_v2" (ML model), "duration_based" (duration rules)
+                - created_timestamp (int): Prediction timestamp in milliseconds
+        :rtype: list[dict]
+
+        .. note::
+            The Phyn API requires timestamps in MILLISECONDS (13 digits).
+            Datetime objects are converted internally; integer timestamps pass
+            through unchanged. Supply each bound using only one keyword.
+        """
+        def timestamp_param(
+            value: Union[datetime, int, None], timestamp: Optional[int], name: str
+        ) -> Union[str, int]:
+            if value is not None and timestamp is not None:
+                raise TypeError(f"Specify only one {name} bound")
+            if timestamp is not None:
+                if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+                    raise TypeError(f"{name}_ts must be an integer millisecond timestamp")
+                return timestamp
+            if isinstance(value, datetime):
+                return str(int(value.timestamp() * 1000))
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+            raise TypeError(f"{name} bound must be a datetime or integer millisecond timestamp")
+
+        params = {
+            "device_id": device_id,
+            "from_ts": timestamp_param(from_datetime, from_ts, "from"),
+            "to_ts": timestamp_param(to_datetime, to_ts, "to"),
+        }
+
+        return await self._request(
+            "get", f"{API_BASE}/water-usage-events", params=params
+        )
+
+    async def submit_water_usage_event_feedback(
+        self,
+        event_id: str,
+        fixture_id: int,
+        *,
+        tell_us: Optional[str] = None,
+    ) -> dict:
+        """Submit fixture correction feedback for a water usage event.
+
+        :param event_id: Water usage event identifier
+        :type event_id: str
+        :param fixture_id: Correct fixture type ID (home_inventory_type_id)
+        :type fixture_id: int
+        :param tell_us: Optional custom fixture text
+        :type tell_us: Optional[str]
+        :return: API response
+        :rtype: dict
+        """
+        data = {
+            "fixture_id": fixture_id,
+            "tell_us": tell_us,
+        }
+        return await self._request(
+            "post",
+            f"{API_BASE}/water-usage-events/{event_id}/feedback/",
+            token_type="id",
+            json=data,
         )

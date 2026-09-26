@@ -1,0 +1,731 @@
+"""Fixtures and helpers for aiophyn tests."""
+
+import ipaddress
+import socket
+import tempfile
+
+import pytest
+from unittest.mock import AsyncMock
+
+from aiophyn.device import Device
+from aiophyn.home import Home
+from aiophyn.home_inventory import HomeInventory
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("local live diagnostics")
+    group.addoption(
+        "--run-live", action="store_true", help="Allow selected live_readonly tests"
+    )
+    group.addoption(
+        "--run-live-writes", action="store_true", help="Unsupported; always errors"
+    )
+    group.addoption(
+        "--env-file", help="Explicit local dotenv file; only with --run-live"
+    )
+    group.addoption("--device-id", help="Device to characterize (or PHYN_DEVICE_ID)")
+    group.addoption(
+        "--history",
+        action="store_true",
+        help="Compare a completed UTC week and seven daily windows",
+    )
+    group.addoption("--history-start", help="Completed UTC week start, YYYY-MM-DD")
+    group.addoption(
+        "--live-report", help="New sanitized JSON report path, preferably .artifacts"
+    )
+
+
+def _loopback(host):
+    if isinstance(host, bytes):
+        host = host.decode("ascii")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    if config.option.basetemp is not None:
+        raise pytest.UsageError(
+            "--basetemp is disabled: tests use a private per-run temporary directory"
+        )
+    # Keep pytest 8's predictable child paths inside an atomically created,
+    # owner-only directory (CVE-2025-71176 mitigation).
+    private_temp = tempfile.TemporaryDirectory(prefix="aiophyn-pytest-")
+    config.add_cleanup(private_temp.cleanup)
+    temp_environment = pytest.MonkeyPatch()
+    config.add_cleanup(temp_environment.undo)
+    temp_environment.setenv("PYTEST_DEBUG_TEMPROOT", private_temp.name)
+
+    if config.getoption("--run-live-writes"):
+        raise pytest.UsageError(
+            "Live writes are unsupported; --run-live permits read-only checks only"
+        )
+    if not config.getoption("--run-live") and any(
+        config.getoption(option)
+        for option in (
+            "--env-file",
+            "--device-id",
+            "--history",
+            "--history-start",
+            "--live-report",
+        )
+    ):
+        raise pytest.UsageError("Live configuration requires explicit --run-live")
+    if config.getoption("--history-start") and not config.getoption("--history"):
+        raise pytest.UsageError("--history-start requires --history")
+    config._live_network_allowed = False
+    guard = pytest.MonkeyPatch()
+    config._network_guard = guard
+    original_dns = socket.getaddrinfo
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def require_loopback(host):
+        if not config._live_network_allowed and not _loopback(host):
+            raise RuntimeError(
+                "Offline test blocked external network; use mocks or a loopback server"
+            )
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host is not None:
+            require_loopback(host)
+        return original_dns(host, *args, **kwargs)
+
+    def connect(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            require_loopback(address[0])
+        return original_connect(sock, address)
+
+    def connect_ex(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            require_loopback(address[0])
+        return original_connect_ex(sock, address)
+
+    guard.setattr(socket, "getaddrinfo", getaddrinfo)
+    guard.setattr(socket.socket, "connect", connect)
+    guard.setattr(socket.socket, "connect_ex", connect_ex)
+
+
+def pytest_unconfigure(config):
+    if hasattr(config, "_network_guard"):
+        config._network_guard.undo()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    live = [item for item in items if item.get_closest_marker("live_readonly")]
+    if not config.getoption("--run-live"):
+        items[:] = [item for item in items if item not in live]
+        config.hook.pytest_deselected(items=live)
+    elif live:
+        # Credential access is confined to the explicitly selected live fixture.
+        return
+    else:
+        raise pytest.UsageError("--run-live requires selected live_readonly tests")
+
+
+@pytest.fixture
+def live_configuration(request):
+    if not request.config.getoption(
+        "--run-live"
+    ) or not request.node.get_closest_marker("live_readonly"):
+        pytest.fail(
+            "Live configuration requires an explicitly selected live_readonly test",
+            pytrace=False,
+        )
+    from examples.diagnostics import ConfigurationError, load_configuration
+
+    try:
+        config = load_configuration(
+            request.config.getoption("--env-file"),
+            request.config.getoption("--device-id"),
+        )
+        if request.config.getoption("--history") and not config.device_id:
+            raise ConfigurationError("History requires PHYN_DEVICE_ID or --device-id")
+    except (ConfigurationError, OSError):
+        pytest.fail(
+            "Live configuration invalid: set PHYN_USERNAME/PHYN_PASSWORD locally; "
+            "history also needs PHYN_DEVICE_ID. --env-file requires an existing file "
+            "and optional python-dotenv. No authentication attempted.",
+            pytrace=False,
+        )
+    request.config._live_network_allowed = True
+    try:
+        yield config
+    finally:
+        request.config._live_network_allowed = False
+
+
+@pytest.fixture
+def mock_request():
+    """Create a mock request function that can be configured per test."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def device(mock_request):
+    """Create a Device instance with a mocked request function."""
+    return Device(mock_request)
+
+
+@pytest.fixture
+def home(mock_request):
+    """Create a Home instance with a mocked request function."""
+    return Home(mock_request)
+
+
+@pytest.fixture
+def home_inventory(mock_request):
+    """Create a HomeInventory instance with a mocked request function."""
+    return HomeInventory(mock_request)
+
+
+# ---- Sample API response data ----
+# Based on real API responses captured from the Phyn API.
+# See: ideation/experiments/home-automation/phyn-api-exploration/test-data/
+
+SAMPLE_FIXTURE_TYPES = [
+    {
+        "home_inventory_type_id": 1,
+        "name": "Hot Tub",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/hot-tub-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 2,
+        "name": "Irrigation System",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/irrigation-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 3,
+        "name": "Outdoor Spigot",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/outdoor-spigot-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 4,
+        "name": "Pool",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/pool-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 5,
+        "name": "Shower Only",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/shower-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 6,
+        "name": "Shower Tub Combo",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/shower-tub-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 7,
+        "name": "Sink",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/sink-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 8,
+        "name": "Toilet",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/toilet-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 9,
+        "name": "Tub",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/tub-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 10,
+        "name": "Water Softener",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/water-softener-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 11,
+        "name": "Reverse Osmosis Filter",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/ro-filter-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 16,
+        "name": "Dishwasher",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/dishwasher-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 30,
+        "name": "Washing Machine",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/washing-machine-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 34,
+        "name": "Other",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 38,
+        "name": "Hot Water Heater",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+        "home_inventory_type": "F",
+    },
+    {
+        "home_inventory_type_id": 42,
+        "name": "Refrigerator",
+        "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+        "home_inventory_type": "F",
+    },
+]
+
+SAMPLE_DEVICE_INVENTORY = {
+    "list": [
+        {
+            "count": 5,
+            "name": "Toilet",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/toilet-black.png",
+            "home_inventory_type_id": 8,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 2,
+            "name": "Shower Only",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/shower-black.png",
+            "home_inventory_type_id": 5,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 9,
+            "name": "Sink",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/sink-black.png",
+            "home_inventory_type_id": 7,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 1,
+            "name": "Dishwasher",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/dishwasher-black.png",
+            "home_inventory_type_id": 16,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 1,
+            "name": "Washing Machine",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/washing-machine-black.png",
+            "home_inventory_type_id": 30,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 2,
+            "name": "Shower Tub Combo",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/shower-tub-black.png",
+            "home_inventory_type_id": 6,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 1,
+            "name": "Tub",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/tub-black.png",
+            "home_inventory_type_id": 9,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 1,
+            "name": "Hot Water Heater",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+            "home_inventory_type_id": 38,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 1,
+            "name": "Refrigerator",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+            "home_inventory_type_id": 42,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 0,
+            "name": "Irrigation System",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/irrigation-black.png",
+            "home_inventory_type_id": 2,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 0,
+            "name": "Hot Tub",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/hot-tub-black.png",
+            "home_inventory_type_id": 1,
+            "home_inventory_type": "F",
+        },
+        {
+            "count": 0,
+            "name": "Other",
+            "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/other-black.png",
+            "home_inventory_type_id": 34,
+            "home_inventory_type": "F",
+        },
+    ]
+}
+
+SAMPLE_WATER_USAGE_EVENTS = [
+    {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890-12345",
+        "device_id": "AABBCCDDEEFF",
+        "product_code": "PP2",
+        "open_edge_timestamp": 1771945200000,
+        "close_edge_timestamp": 1771945260000,
+        "total_flow": 1.53,
+        "flow_rate": 1.53,
+        "latest_user_feedback": {},
+        "latest_suggested_fixtures_result": {
+            "algorithm_name": "ruleflowtimefeatures",
+            "suggested_fixtures": [
+                {
+                    "fixture_id": 8,
+                    "fixture_name": "Toilet",
+                    "confidence_score": 0.85,
+                    "prediction_algorithm": "clustering",
+                },
+                {
+                    "fixture_id": 7,
+                    "fixture_name": "Sink",
+                    "confidence_score": 0.10,
+                    "prediction_algorithm": "heuristics",
+                },
+            ],
+            "created_timestamp": 1771945320000,
+        },
+    },
+    {
+        "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901-12345",
+        "device_id": "AABBCCDDEEFF",
+        "product_code": "PP2",
+        "open_edge_timestamp": 1771948800000,
+        "close_edge_timestamp": 1771949400000,
+        "total_flow": 15.2,
+        "flow_rate": 2.53,
+        "latest_user_feedback": {},
+        "latest_suggested_fixtures_result": {
+            "algorithm_name": "ruleflowtimefeatures",
+            "suggested_fixtures": [
+                {
+                    "fixture_id": 5,
+                    "fixture_name": "Shower Only",
+                    "confidence_score": 0.92,
+                    "prediction_algorithm": "clustering",
+                },
+            ],
+            "created_timestamp": 1771949460000,
+        },
+    },
+    {
+        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012-12345",
+        "device_id": "AABBCCDDEEFF",
+        "product_code": "PP2",
+        "open_edge_timestamp": 1771952400000,
+        "close_edge_timestamp": 1771952460000,
+        "total_flow": 0.8,
+        "flow_rate": 0.8,
+        "latest_user_feedback": {
+            "fixture_id": 7,
+            "tell_us": "Kitchen Sink",
+        },
+        "latest_suggested_fixtures_result": {
+            "algorithm_name": "ruleflowtimefeatures",
+            "suggested_fixtures": [
+                {
+                    "fixture_id": 7,
+                    "fixture_name": "Sink",
+                    "confidence_score": 0.78,
+                    "prediction_algorithm": "heuristics",
+                },
+            ],
+            "created_timestamp": 1771952520000,
+        },
+    },
+    {
+        "id": "d4e5f6a7-b8c9-0123-defa-234567890123-12345",
+        "device_id": "AABBCCDDEEFF",
+        "product_code": "PP2",
+        "open_edge_timestamp": 1771824392128,
+        "close_edge_timestamp": 1771824441115,
+        "total_flow": 0.496,
+        "flow_rate": 0.608,
+        "latest_user_feedback": {},
+        "latest_suggested_fixtures_result": {
+            "algorithm_name": "ruleflowtimefeatures",
+            "suggested_fixtures": [
+                {
+                    "fixture_id": 16,
+                    "fixture_name": "Dishwasher",
+                    "confidence_score": 0.452,
+                    "prediction_algorithm": "user-feedback",
+                },
+                {
+                    "fixture_id": 7,
+                    "fixture_name": "Sink",
+                    "confidence_score": 0,
+                    "prediction_algorithm": "heuristics",
+                },
+                {
+                    "fixture_id": 8,
+                    "fixture_name": "Toilet",
+                    "confidence_score": 0,
+                    "prediction_algorithm": "heuristics",
+                },
+            ],
+            "created_timestamp": 1771824532710,
+        },
+    },
+]
+
+SAMPLE_DEVICE_STATE = {
+    "sd_status": {
+        "v": "G",
+        "r": "watchdog",
+        "ts": 1770911462000,
+    },
+    "device_id": "AABBCCDDEEFF",
+    "product_code": "PP2",
+    "temperature": {
+        "min": 56.08,
+        "max": 75.41,
+        "mean": 65.89035547874674,
+        "ts": 1771749748730,
+    },
+    "flow": {
+        "min": 0.3906375222271139,
+        "max": 3.0041370143149284,
+        "mean": 1.721237873423644,
+        "ts": 1771749748730,
+    },
+    "fw_version": "40809001",
+    "signal_strength": -67,
+    "online_status": {
+        "v": "online",
+        "sid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "ts": 1771524507950,
+    },
+    "hw_version": "0",
+    "network_name": "IoT",
+    "auto_shutoff_eligible": 100,
+    "serial_number": "000000PP200001",
+    "sov_status": {
+        "v": "Open",
+        "ts": 1771524508000,
+    },
+    "pressure": {
+        "min": 51.998128179043746,
+        "median": 58.6375967413442,
+        "max": 61.94134419551935,
+        "mean": 58.66604666236688,
+        "percentile95": 59.437041479542465,
+        "pressure_threshold_95": 59.9,
+        "percentile5": 57.94231633906762,
+        "ts": 1771749748730,
+    },
+    "timezone": "America/New_York",
+    "partner": "phyn",
+    "users": ["pws-00000000-0000-0000-0000-000000000001"],
+    "auto_shutoff_enable": True,
+    "created_ts": 1645972604139,
+}
+
+# Alternate device state for a second device (different values, auto_shutoff off)
+SAMPLE_DEVICE_STATE_2 = {
+    "sd_status": {
+        "v": "G",
+        "r": "watchdog",
+        "ts": 1770885976000,
+    },
+    "device_id": "112233445566",
+    "product_code": "PP2",
+    "temperature": {
+        "min": 62.93,
+        "max": 65.57,
+        "mean": 64.42262528578821,
+        "ts": 1771750658485,
+    },
+    "flow": {
+        "min": 0,
+        "max": 0,
+        "mean": 0,
+        "ts": 1771750658485,
+    },
+    "fw_version": "40809001",
+    "signal_strength": -40,
+    "online_status": {
+        "v": "online",
+        "sid": "11111111-2222-3333-4444-555555555555",
+        "ts": 1771465887748,
+    },
+    "hw_version": "0",
+    "network_name": "IoT",
+    "auto_shutoff_eligible": 100,
+    "serial_number": "000000PP200002",
+    "sov_status": {
+        "a": "app:0000000000000:0000000000",
+        "client_ts": 1771750373770,
+        "v": "Open",
+        "ts": 1771750373668,
+    },
+    "pressure": {
+        "min": 70.36378433367243,
+        "median": 76.41141403865717,
+        "max": 82.30929878048781,
+        "mean": 76.31288165129982,
+        "percentile95": 78.56825301673159,
+        "pressure_threshold_95": 78.6,
+        "percentile5": 73.6178514750763,
+        "ts": 1771750658485,
+    },
+    "timezone": "America/New_York",
+    "partner": "phyn",
+    "users": ["pws-00000000-0000-0000-0000-000000000001"],
+    "auto_shutoff_enable": False,
+    "created_ts": 1692219723466,
+}
+
+SAMPLE_HOMES = [
+    {
+        "id": "home_001",
+        "address": {"address1": "123 Main St"},
+        "device_ids": ["AABBCCDDEEFF", "112233445566"],
+        "devices": [
+            {
+                "device_id": "AABBCCDDEEFF",
+                "product_code": "PP2",
+                "name": "Phyn Plus",
+            },
+            {
+                "device_id": "112233445566",
+                "product_code": "PP2",
+                "name": "Phyn Plus 2",
+            },
+        ],
+    }
+]
+
+SAMPLE_CONSUMPTION = {
+    "water_consumption": 53.95314,
+    "details": {
+        "6": 0.17969,
+        "7": 2.73438,
+        "8": 1.42188,
+        "9": 2.89062,
+        "10": 2.57031,
+        "11": 1.0625,
+        "12": 1.35938,
+        "13": 17.48438,
+        "14": 6.32813,
+        "15": 0.25,
+        "16": 1.38281,
+        "17": 1.42969,
+        "18": 1.50781,
+        "19": 2.21875,
+        "20": 1.35938,
+        "21": 1.07812,
+        "23": 8.69531,
+    },
+    "water_usage_event_count": 50,
+    "average_consumption": 189.221,
+}
+
+# Consumption with no usage (e.g. second device with no activity)
+SAMPLE_CONSUMPTION_EMPTY = {
+    "water_consumption": 0,
+    "details": {},
+    "water_usage_event_count": 0,
+    "average_consumption": 181.34,
+}
+
+SAMPLE_FIRMWARE_INFO = {
+    "device_id": "AABBCCDDEEFF",
+    "server_ts": 1771524508293,
+    "fw_version": 40809001,
+    "upgraded_seconds": 1770513217,
+}
+
+SAMPLE_WATER_STATISTICS = [
+    {
+        "flow": {
+            "max": 3.0041370143149284,
+            "mean": 1.721237873423644,
+            "min": 0.3906375222271139,
+        },
+        "pressure": {
+            "min": 51.998128179043746,
+            "median": 58.6375967413442,
+            "max": 61.94134419551935,
+            "mean": 58.66604666236688,
+            "percentile95": 59.437041479542465,
+            "pressure_threshold_95": 59.9,
+            "percentile5": 57.94231633906762,
+        },
+        "plus_rt_threshold": 0.04,
+        "device_id": "AABBCCDDEEFF",
+        "plumbing_type": "non-prv",
+        "ecowater_found_today": False,
+        "device_local_date": "2026/02/21",
+        "ecowater_exist": False,
+        "temperature": {
+            "max": 75.41,
+            "mean": 65.89035547874674,
+            "min": 56.08,
+        },
+        "quiet_periods": [2, 3, 5],
+        "ts": 1771749748730,
+    },
+    {
+        "flow": {
+            "max": 4.4843918728698196,
+            "mean": 2.1900192425756173,
+            "min": 0.3294016393442623,
+        },
+        "pressure": {
+            "min": 42.18183943089431,
+            "median": 58.1810986775178,
+            "max": 64.98936927772127,
+            "mean": 58.24300353871653,
+            "percentile95": 59.785097560975615,
+            "pressure_threshold_95": 59.9,
+            "percentile5": 57.231166316173315,
+        },
+        "plus_rt_threshold": 0.04,
+        "device_id": "AABBCCDDEEFF",
+        "plumbing_type": "non-prv",
+        "ecowater_found_today": False,
+        "device_local_date": "2026/02/20",
+        "ecowater_exist": False,
+        "temperature": {
+            "max": 75.06,
+            "mean": 66.28291281672779,
+            "min": 53.09,
+        },
+        "quiet_periods": [2, 3, 5],
+        "ts": 1771663423760,
+    },
+]
+
+SAMPLE_DEVICE_PREFERENCES = [
+    {
+        "name": "leak_sensitivity_away_mode",
+        "value": "false",
+        "device_id": "AABBCCDDEEFF",
+    },
+]
+
+SAMPLE_AWAY_MODE = {
+    "name": "leak_sensitivity_away_mode",
+    "value": "false",
+    "device_id": "AABBCCDDEEFF",
+}

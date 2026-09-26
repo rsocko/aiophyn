@@ -1,4 +1,4 @@
-"""Read-only discovery, state and consumption example."""
+"""Read-only endpoint diagnostics; explicit runtime credentials only."""
 
 if __name__ == "__main__":
     if __package__:
@@ -6,4 +6,4 @@ if __name__ == "__main__":
     else:
         from diagnostics import cli
 
-    raise SystemExit(cli("api"))
+    raise SystemExit(cli("comprehensive"))

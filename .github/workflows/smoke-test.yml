@@ -1,0 +1,46 @@
+name: Offline tests and packaging
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "work/**"
+      - "validation/**"
+      - "rsocko-*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests-and-distributions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: pipx install poetry==2.2.1
+
+      - name: Install locked runtime and development dependencies
+        run: |
+          poetry env use "$(command -v python)"
+          poetry check --lock
+          poetry sync --with dev
+
+      - name: Run offline unit and contract tests
+        run: |
+          poetry run python -m pip check
+          poetry run python -m pytest tests
+
+      - name: Verify clean wheel, sdist, and source-archive builds
+        run: poetry run python scripts/verify_distribution.py
