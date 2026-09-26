@@ -4,6 +4,11 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Document observed history-request behavior: 366 days accepted on one device,
+  730 days ending in a gateway timeout, and no established maximum retention.
+  Clarify the arbitrary integration-side 365-day selector guard and recommend
+  bounded sequential chunks for future backfills without claiming the SDK
+  already performs automatic chunking.
 - Remove unsupported named-instance assumptions: drop the feedback
   `sub_fixture_id` parameter and outgoing field, inventory instance examples,
   and the hypothetical instance-join analyzer/tests. Historical adapted

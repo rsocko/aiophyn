@@ -144,6 +144,14 @@ selects a completed seven-day interval, useful for a known-active older period.
 It does not initiate a large historical backfill. Details, comparison limits and
 request limits are in [testing](testing.md#history-characterization).
 
+For long backfills, use bounded sequential windows rather than one huge API
+request. This is a recommendation for consumers, not automatic chunking by
+the SDK or this example. The HA integration's current 365-day selector cap is
+an arbitrary local guard: a live one-device probe accepted 366 days, while a
+730-day request ended in HTTP 504, not a proven range-limit rejection.
+See [history request limits and chunking](testing.md#history-request-limits-and-chunking)
+for evidence, timeout considerations, and safe progress/error handling.
+
 ## MQTT example (separate legacy setup)
 
 `test_mqtt.py` still uses local `examples/config.py`; it does **not** read dotenv

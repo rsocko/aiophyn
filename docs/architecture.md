@@ -131,6 +131,22 @@ retention, ordering, boundary inclusivity, open-versus-close timestamp selection
 and ongoing-event behavior are not established. Empty or absent observations
 do not prove zero historical consumption or deletion.
 
+There is **no SDK-enforced maximum history span**. The companion Home Assistant
+integration's current 1-365-day selector is an arbitrary, locally chosen guard,
+not a discovered Phyn API or retention limit. Its explicit-date service path
+does not share that selector cap. In a bounded one-device probe on 2026-09-26,
+366 days returned HTTP 200 with actual events from the additional day; 730 days
+returned HTTP 504 after about 29 seconds. That gateway timeout does not identify
+a maximum accepted date or span.
+
+For long backfills, prefer bounded sequential date-window requests with
+deduplication, durable progress, and explicit partial-failure handling instead
+of one huge request. This is a **consumer implementation recommendation**:
+`get_water_usage_events` still performs a single logical GET and does not
+automatically chunk requests. See
+[history request limits and chunking](testing.md#history-request-limits-and-chunking)
+for the observations, local limits, and operational caveats.
+
 An event ID is usable in the feedback URL, but stability across corrections,
 splits/merges, or reprocessing is not proven. The nested prediction
 `created_timestamp` is not an established event-wide revision for volume or

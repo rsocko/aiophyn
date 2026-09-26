@@ -160,6 +160,75 @@ empty, and **absence is not proof of retention policy**. Retention and paginatio
 remain unknown; physical fixture classification accuracy is not measured.
 The harness neither backfills nor deletes/imports Home Assistant statistics.
 
+### History request limits and chunking
+
+**365 days is an arbitrary local integration limit, not a Phyn API limit.**
+The companion Home Assistant integration currently offers a 1-365-day `days`
+selector. This is a chosen guard on the requested span, not a server-derived
+maximum, a promise of available history, or a proven safe single-request size.
+The integration's explicit-date service path has ordering validation but does
+not share that selector cap. The SDK event method itself enforces no maximum
+span. The example CLI's 1-31-day ranges and seven-day history comparison are
+separate local diagnostic limits.
+
+An explicitly authorized, read-only probe on **2026-09-26** tested one configured
+device with a fixed completed UTC end of **2026-09-26 00:00:00Z**. It used source
+`b8076910349a991d7e6e3c2c10d167e6c9d538e1` (version `2026.9.2.dev1`, not the
+published wheel); the event GET implementation was unchanged from the release.
+
+| Requested span | HTTP outcome | Approximate elapsed time |
+|---|---|---|
+| 1 day | 200, nonempty event list | 0.3 seconds |
+| 7 days | 200, nonempty event list | 1.4 seconds |
+| 31 days | 200, nonempty event list | 2.4 seconds |
+| 90 days | 200, nonempty event list | 3.6 seconds |
+| 365 days | 200, nonempty event list | 13.2 seconds |
+| 366 days | 200, including actual events from the additional older day | 13.5 seconds |
+| 730 days | 504 gateway timeout; no usable event list | 29.1 seconds |
+
+A short, previously observed activity window succeeded before these requests.
+Each successful longer span contained all event IDs from the preceding shorter
+span. The run stopped immediately at HTTP 504; the planned repeated control and
+any further probes were not performed. There were eight history GETs and two
+Cognito sends, with no retries, account writes, or HA imports. Response-size,
+elapsed-time, and request-count guards bounded the experiment. Household event
+counts, volumes, identifiers, and raw payloads are not included here.
+
+The 366-day result rules out a universal 365-day limit for the tested request
+and demonstrates data beyond one year on that device. **It does not establish
+maximum retention or complete coverage.** HTTP 504 is a server/gateway timeout,
+not an explicit date/length validation rejection and not evidence that older
+data is unavailable. No other device or longer chunked backfill was tested in
+this experiment. Timings depend on event density and service conditions.
+
+**Recommended approach for future long backfills:**
+
+- Split the requested overall period into bounded sequential windows, for
+  example starting with 7-31 days per pull. This is a starting policy, not a
+  verified server maximum or a universally safe chunk size. Bound response
+  bytes, request counts, elapsed time, and concurrency as well as days.
+- Keep the overall end time fixed and use timezone-aware UTC bounds. Handle
+  overlaps/boundary duplicates by device-scoped event ID, preserving the
+  consumer's existing timestamp-allocation and correction policy. Server
+  boundary inclusivity and open-versus-close filtering remain unproven.
+- Persist progress only after accepting and durably reconciling a chunk.
+  Report partial completion and the failed window; a failed or timed-out
+  request is not an empty successful interval. Do not erase accepted history
+  because events are omitted from a response.
+- Respect authentication, rate-limit, and service errors. Stop or apply an
+  explicitly bounded recovery policy rather than repeatedly retrying a huge
+  request or increasing parallel load. Support cancellation and safe resume.
+- Check the consumer's effective timeout: these successful year-long responses
+  exceeded the SDK's 10-second default for self-created HTTP sessions. A
+  caller-provided session can use a different timeout. Raising a timeout alone
+  does not solve oversized responses, server caps, or gateway deadlines.
+
+**Chunked long-backfill orchestration is a recommendation, not functionality
+added by this documentation.** The SDK method remains one logical GET per call,
+the existing history diagnostic compares one week with daily reads, and the
+integration's current backfill path is not claimed to automatically split
+large requested periods. This experiment does not authorize more live probes.
+
 ### Offline coverage of the harness
 
 For the bounded category inventory/event assessment and the removal of
