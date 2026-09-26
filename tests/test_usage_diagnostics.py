@@ -270,7 +270,7 @@ def test_human_selection_survives_invalid_optional_model_confidence(value):
 
 
 def test_model_average_excludes_user_corrections_and_preserves_total():
-    user = dict(event(3), latest_user_feedback={"fixture_id": "7", "sub_fixture_id": 12})
+    user = dict(event(3), latest_user_feedback={"fixture_id": "7"})
     result = summarize_usage([user, event(2), event(5, False)])
     assert result["total_gallons"] == 10
     assert result["fixtures"]["Sink"] == {

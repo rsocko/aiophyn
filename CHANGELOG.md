@@ -4,6 +4,16 @@ All notable changes to the `aiophyn` library will be documented in this file.
 
 ## [Unreleased]
 
+- Remove unsupported named-instance assumptions: drop the feedback
+  `sub_fixture_id` parameter and outgoing field, inventory instance examples,
+  and the hypothetical instance-join analyzer/tests. Historical adapted
+  examples were not sufficient evidence of this API capability.
+- Make feedback `tell_us` keyword-only so an old positional instance ID cannot
+  silently become a comment. Callers must use
+  `submit_water_usage_event_feedback(event_id, fixture_id, tell_us=...)`.
+- Preserve category counts, category attribution, and raw response pass-through.
+  This source change does not modify the existing immutable development release.
+
 ## [2026.9.2.dev1] - Fork development prerelease
 
 - Package the validated fixture-usage branch as a uniquely versioned wheel and

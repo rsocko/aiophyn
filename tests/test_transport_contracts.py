@@ -315,10 +315,10 @@ async def test_invalid_bounds_do_not_send_request(transport, bounds, message):
 @pytest.mark.parametrize(
     "options,body",
     [
-        ({}, {"fixture_id": 8, "sub_fixture_id": None, "tell_us": None}),
+        ({}, {"fixture_id": 8, "tell_us": None}),
         (
-            {"sub_fixture_id": 12, "tell_us": "Kitchen + sink"},
-            {"fixture_id": 8, "sub_fixture_id": 12, "tell_us": "Kitchen + sink"},
+            {"tell_us": "Category + correction"},
+            {"fixture_id": 8, "tell_us": "Category + correction"},
         ),
     ],
 )

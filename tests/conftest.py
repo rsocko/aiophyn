@@ -302,13 +302,6 @@ SAMPLE_DEVICE_INVENTORY = {
             "image": "https://s3.amazonaws.com/com.phyn.icons/prd/v2/shower-black.png",
             "home_inventory_type_id": 5,
             "home_inventory_type": "F",
-            "sub_fixtures": [
-                {
-                    "name": "Master Bathroom",
-                    "active": True,
-                    "id": 1647984949429,
-                }
-            ],
         },
         {
             "count": 9,
@@ -444,7 +437,6 @@ SAMPLE_WATER_USAGE_EVENTS = [
         "flow_rate": 0.8,
         "latest_user_feedback": {
             "fixture_id": 7,
-            "sub_fixture_id": 0,
             "tell_us": "Kitchen Sink",
         },
         "latest_suggested_fixtures_result": {

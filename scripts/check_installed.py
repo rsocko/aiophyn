@@ -54,7 +54,7 @@ async def check_features():
         "post",
         f"{API_BASE}/water-usage-events/offline-event/feedback/",
         token_type="id",
-        json={"fixture_id": 8, "sub_fixture_id": None, "tell_us": None},
+        json={"fixture_id": 8, "tell_us": None},
     )
 
     request.reset_mock()

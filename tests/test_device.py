@@ -523,17 +523,16 @@ class TestWaterUsageEventFeedback:
             token_type="id",
             json={
                 "fixture_id": 8,
-                "sub_fixture_id": None,
                 "tell_us": None,
             },
         )
 
     @pytest.mark.asyncio
-    async def test_submit_feedback_with_optional_fields(self, device, mock_request):
+    async def test_submit_feedback_with_comment(self, device, mock_request):
         mock_request.return_value = {"ok": True}
 
         await device.submit_water_usage_event_feedback(
-            "evt_002", 7, sub_fixture_id=12, tell_us="Kitchen Sink"
+            "evt_002", 7, tell_us="Category corrected"
         )
 
         mock_request.assert_called_once_with(
@@ -542,10 +541,21 @@ class TestWaterUsageEventFeedback:
             token_type="id",
             json={
                 "fixture_id": 7,
-                "sub_fixture_id": 12,
-                "tell_us": "Kitchen Sink",
+                "tell_us": "Category corrected",
             },
         )
+
+    @pytest.mark.asyncio
+    async def test_removed_instance_keyword_rejected_before_request(self, device, mock_request):
+        with pytest.raises(TypeError, match="sub_fixture_id"):
+            await device.submit_water_usage_event_feedback("evt_002", 7, sub_fixture_id=12)
+        mock_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_old_positional_instance_not_reinterpreted_as_comment(self, device, mock_request):
+        with pytest.raises(TypeError):
+            await device.submit_water_usage_event_feedback("evt_002", 7, 12)
+        mock_request.assert_not_called()
 
 
 class TestValveControl:

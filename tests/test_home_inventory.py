@@ -159,26 +159,22 @@ class TestGetDeviceInventory:
             assert f["image"].startswith("https://")
 
     @pytest.mark.asyncio
-    async def test_sub_fixtures(self, home_inventory, mock_request):
-        """Verify sub_fixtures field is present on some entries (real API feature)."""
-        mock_request.return_value = SAMPLE_DEVICE_INVENTORY
+    async def test_unknown_response_fields_preserved(self, home_inventory, mock_request):
+        """Unknown server metadata passes through without inferred semantics."""
+        payload = {
+            "list": [{
+                "home_inventory_type_id": 5,
+                "name": "Shower Only",
+                "count": 2,
+                "unknown_metadata": {"opaque": [1, None]},
+            }],
+            "unknown_envelope": True,
+        }
+        mock_request.return_value = payload
         result = await home_inventory.get_device_inventory("DEVICE123")
-
-        # Find Shower Only entry which has sub_fixtures in real data
-        shower = next(
-            (f for f in result["list"] if f["name"] == "Shower Only"), None
-        )
-        assert shower is not None
-        assert "sub_fixtures" in shower
-        assert isinstance(shower["sub_fixtures"], list)
-        assert len(shower["sub_fixtures"]) >= 1
-
-        sub = shower["sub_fixtures"][0]
-        assert "name" in sub
-        assert "active" in sub
-        assert "id" in sub
-        assert sub["name"] == "Master Bathroom"
-        assert sub["active"] is True
+        assert result is payload
+        assert result["list"][0]["unknown_metadata"] == {"opaque": [1, None]}
+        assert result["list"][0]["count"] == 2
 
     @pytest.mark.asyncio
     async def test_different_device_ids(self, home_inventory, mock_request):

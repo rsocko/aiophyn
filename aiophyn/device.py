@@ -382,7 +382,7 @@ class Device:
         self,
         event_id: str,
         fixture_id: int,
-        sub_fixture_id: Optional[int] = None,
+        *,
         tell_us: Optional[str] = None,
     ) -> dict:
         """Submit fixture correction feedback for a water usage event.
@@ -391,8 +391,6 @@ class Device:
         :type event_id: str
         :param fixture_id: Correct fixture type ID (home_inventory_type_id)
         :type fixture_id: int
-        :param sub_fixture_id: Optional sub-fixture identifier
-        :type sub_fixture_id: Optional[int]
         :param tell_us: Optional custom fixture text
         :type tell_us: Optional[str]
         :return: API response
@@ -400,7 +398,6 @@ class Device:
         """
         data = {
             "fixture_id": fixture_id,
-            "sub_fixture_id": sub_fixture_id,
             "tell_us": tell_us,
         }
         return await self._request(

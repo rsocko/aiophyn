@@ -162,10 +162,11 @@ The harness neither backfills nor deletes/imports Home Assistant statistics.
 
 ### Offline coverage of the harness
 
-For the later bounded inventory/event join assessment and its synthetic tests,
-see [sub-fixture evidence](subfixture-evidence.md). It distinguishes named
-inventory availability from individual usage attribution without changing
-runtime statistics.
+For the bounded category inventory/event assessment and the removal of
+unsupported named-instance assumptions, see
+[inventory evidence](subfixture-evidence.md). The hypothetical instance-join
+analyzer and its synthetic tests have been removed; synthetic joins did not
+establish a live API capability.
 
 `test_usage_diagnostics.py`, `test_history_diagnostics.py` and
 `test_live_guards.py` use new, entirely synthetic fixtures (no private captures).
@@ -180,7 +181,7 @@ by path; this is not a content-secret scanner.
 `tests/fixtures/attribution_cases.json` supplies synthetic conformance vectors
 for user-first category attribution, independent of a runtime library API.
 Coverage includes ID-only and orphan user choices, normalized/zero IDs,
-comment/subfixture-only feedback, unsorted model scores, exact ties and reorder
+comment-only and unknown feedback metadata, unsorted model scores, exact ties and reorder
 sensitivity, malformed fields, explicit model-metadata warnings under a valid
 human choice, label conflicts, and catalog reuse without additional reads.
 Bucket totals conserve full event volume; user choices do not inherit model
@@ -455,11 +456,13 @@ Verifies that top-level imports work correctly.
 | `test_get_water_statistics` | Correct URL and timestamp params |
 | `test_water_statistics_has_real_api_structure` | Flow, pressure, temperature, metadata fields |
 
-#### `TestWaterUsageEventFeedback` (2 tests)
+#### `TestWaterUsageEventFeedback` (4 tests)
 | Test | Validates |
 |------|-----------|
 | `test_submit_feedback_basic` | Correct URL and payload with required fields |
-| `test_submit_feedback_with_optional_fields` | Optional `sub_fixture_id` and `tell_us` fields |
+| `test_submit_feedback_with_comment` | Keyword-only `tell_us` comment |
+| `test_removed_instance_keyword_rejected_before_request` | Removed instance argument fails before any request |
+| `test_old_positional_instance_not_reinterpreted_as_comment` | Old third positional argument cannot silently become a comment |
 
 #### `TestValveControl` (2 tests)
 | Test | Validates |
@@ -544,7 +547,7 @@ Verifies that top-level imports work correctly.
 | `test_configured_fixtures` | 9 fixtures with count > 0 identified |
 | `test_unconfigured_fixtures` | 3 fixtures with count = 0 identified |
 | `test_fixture_entry_structure` | Each entry has required fields |
-| `test_sub_fixtures` | Sub-fixtures on Shower Only (name, active, id) |
+| `test_unknown_response_fields_preserved` | Unknown metadata passes through without inferred meaning |
 | `test_different_device_ids` | URL changes per device ID |
 
 #### `TestUpdateDeviceInventory` (5 tests)
@@ -568,7 +571,7 @@ The shared test configuration file that provides:
 The sample data is designed to cover realistic scenarios including:
 - Multiple devices with varying states
 - Active and idle devices
-- Fixtures with and without sub-fixtures
+- Category inventory counts without inferred individual identities
 - Water events with different prediction algorithms
 - User-corrected and uncorrected events
 - Configured and unconfigured fixture entries

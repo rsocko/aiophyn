@@ -73,8 +73,8 @@ model category's name is never reused for a user selection. Conflicting names fo
 one ID are flagged; without a catalog, the ID label is retained. Catalog versus
 suggestion conflicts use the catalog label with a warning. Usage-only mode does
 not add a catalog request; comprehensive/live modes reuse their existing read.
-`sub_fixture_id` identifies a separate household instance where supplied, not
-the category. Free text `tell_us`, unproven label fields, and a model algorithm
+Configured counts do not identify individual household fixtures. Free text
+`tell_us`, unproven label fields, and a model algorithm
 named `user-feedback` do not independently establish a category selection.
 
 Events with neither an explicit category nor an attributable prediction are
@@ -117,7 +117,7 @@ the user or a reason by itself to request another correction.
 
 Review or change an event's attribution in the **Phyn app**. An intentional SDK
 client can use the existing `submit_water_usage_event_feedback(event_id,
-fixture_id, sub_fixture_id=None, tell_us=None)` method; it is a write operation,
+fixture_id, *, tell_us=None)` method; it is a write operation,
 not part of these diagnostics. Refetch events to observe returned corrections.
 The diagnostics never submit feedback automatically or infer a new selection
 from review flags. No new editing UI, event export, or Home Assistant mutation

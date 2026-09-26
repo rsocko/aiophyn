@@ -119,8 +119,11 @@ booleans are not accepted as timestamps. Range ordering and timestamp magnitude
 are not additionally validated.
 
 Feedback uses `POST /water-usage-events/{event_id}/feedback/` with an **ID token**
-and JSON `{"fixture_id": 8, "sub_fixture_id": null, "tell_us": null}`. Optional
-values replace the nulls when supplied; the fields are not omitted.
+and JSON `{"fixture_id": 8, "tell_us": null}`. The optional keyword-only
+`tell_us` replaces null when supplied. The unsupported `sub_fixture_id`
+argument and outgoing field have been removed; historical examples did not
+establish their server semantics. The revised body is covered by offline wire
+contracts, not a fresh live feedback write.
 
 The event method makes one logical GET and returns the decoded payload without
 paging, deduplication, or reconciliation. Server result caps, pagination,
@@ -137,8 +140,9 @@ fetch is a consumer's local acceptance policy, not authoritative revision
 ordering.
 
 `fixture_id` denotes a catalog category (`home_inventory_type_id`), not a
-particular household fixture. Separate optional `sub_fixture_id` values can
-reference named instances; labels alone are not stable household identities.
+particular household fixture. Named-instance attribution is not supported.
+Inventory counts and labels do not establish individual household identities.
+Unknown response fields still pass through unchanged without interpretation.
 The diagnostic history comparator uses half-open start-time ownership as a
 local comparison convention, not a claim about server window semantics.
 

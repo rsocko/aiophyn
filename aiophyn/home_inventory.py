@@ -46,9 +46,8 @@ class HomeInventory:
         :type device_id: str
         :return: Dict containing a ``list`` key with fixture entries.
             Each entry has home_inventory_type_id (int), name (str),
-            count (int), image (str, S3 URL), home_inventory_type (str, "F"),
-            and optionally sub_fixtures (list[dict]) with named sub-fixture
-            entries containing name (str), active (bool), and id (int).
+            count (int), image (str, S3 URL), and home_inventory_type (str, "F").
+            Counts describe categories, not individually identified fixtures.
         :rtype: dict
 
         Example response::
@@ -56,7 +55,7 @@ class HomeInventory:
             {
                 "list": [
                     {"home_inventory_type_id": 8, "name": "Toilet", "count": 5, "image": "https://s3.amazonaws.com/.../toilet-black.png", "home_inventory_type": "F"},
-                    {"home_inventory_type_id": 5, "name": "Shower Only", "count": 2, "image": "https://s3.amazonaws.com/.../shower-black.png", "home_inventory_type": "F", "sub_fixtures": [{"name": "Master Bathroom", "active": true, "id": 1647984949429}]},
+                    {"home_inventory_type_id": 5, "name": "Shower Only", "count": 2, "image": "https://s3.amazonaws.com/.../shower-black.png", "home_inventory_type": "F"},
                     {"home_inventory_type_id": 7, "name": "Sink", "count": 9, "image": "https://s3.amazonaws.com/.../sink-black.png", "home_inventory_type": "F"},
                     {"home_inventory_type_id": 16, "name": "Dishwasher", "count": 1, "image": "https://s3.amazonaws.com/.../dishwasher-black.png", "home_inventory_type": "F"},
                     {"home_inventory_type_id": 2, "name": "Irrigation System", "count": 0, "image": "https://s3.amazonaws.com/.../irrigation-black.png", "home_inventory_type": "F"},
